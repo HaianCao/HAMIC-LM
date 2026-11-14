@@ -114,14 +114,16 @@ class HuggingFaceObjectStore:
     """A (private) Hugging Face Hub repository used as an object store.
 
     Each ``put_*`` call is one Hub commit, so a batch of payload files appears atomically.
-    Authentication comes from the ``HF_TOKEN`` environment variable or the cached login;
-    tokens are never passed as arguments or written to disk by this class.
+    The token is taken from ``token`` when given (e.g. typed into a password field), else
+    from ``HF_TOKEN`` or the cached login. This class never logs or writes the token.
 
     Args:
-        repo_id: e.g. ``"HAMIC/hamic-runs"``.
+        repo_id: e.g. ``"<namespace>/hamic-runs"``.
         repo_type: ``"model"`` (default) or ``"dataset"``.
         private: Create the repository as private if it does not exist.
-        create: Create the repository when missing.
+        create: Create the repository when missing. An existing repository is never
+            touched, so a fine-grained token scoped to that one repository is enough.
+        token: Hugging Face access token held in memory only.
     """
 
     def __init__(
@@ -130,14 +132,22 @@ class HuggingFaceObjectStore:
         repo_type: str = "model",
         private: bool = True,
         create: bool = True,
+        token: str | None = None,
     ) -> None:
         from huggingface_hub import HfApi
 
         self.repo_id = repo_id
         self.repo_type = repo_type
-        self._api = HfApi()
-        if create:
-            self._api.create_repo(repo_id, repo_type=repo_type, private=private, exist_ok=True)
+        self._api = HfApi(token=token or None)
+        if create and not self._api.repo_exists(repo_id, repo_type=repo_type):
+            self._api.create_repo(repo_id, repo_type=repo_type, private=private)
+
+    def __repr__(self) -> str:
+        return f"HuggingFaceObjectStore(repo_id={self.repo_id!r}, repo_type={self.repo_type!r})"
+
+    def whoami(self) -> str:
+        """Return the account name the token belongs to (verifies the token works)."""
+        return str(self._api.whoami()["name"])
 
     def put_files(self, files: Mapping[str, Path], message: str) -> None:
         """Upload files in a single commit."""

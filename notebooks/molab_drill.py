@@ -7,7 +7,10 @@ Run in two Molab sessions:
 2. Restart the kernel or open a new session, choose phase "resume": the run restores from
    the Hub only and must continue with losses identical to an uninterrupted reference.
 
-Set ``HF_TOKEN`` through Molab's environment/secrets UI. Never paste it into a cell.
+Paste a fine-grained Hugging Face token (write access to ``HUB_REPO`` only) into the
+password field. It stays in kernel memory and is never written to the notebook source;
+an ``HF_TOKEN`` environment variable, if present, is used when the field is empty.
+Never type the token into a code cell: Molab notebooks are viewable by anyone with the link.
 """
 
 import marimo
@@ -32,7 +35,7 @@ def _():
 @app.cell
 def _():
     # Pin an exact commit; an unpinned branch makes the run irreproducible.
-    HAMIC_SOURCE = "git+https://github.com/<owner>/HAMIC-LM@<commit-sha>"
+    HAMIC_SOURCE = "git+https://github.com/HaianCao/HAMIC-LM@<commit-sha>"
     HUB_REPO = "<hf-namespace>/hamic-runs"
     RUN_ID = "drill-001"
     return HAMIC_SOURCE, HUB_REPO, RUN_ID
@@ -85,28 +88,46 @@ def _(mo, probe):
 
 @app.cell
 def _(mo):
-    import os
-
-    mo.stop(
-        not os.environ.get("HF_TOKEN"),
-        mo.md("**`HF_TOKEN` is not set.** Add it in Molab's environment settings."),
+    token_input = mo.ui.text(
+        kind="password",
+        label="Hugging Face token (fine-grained, write access to HUB_REPO only)",
+        full_width=True,
     )
-    phase = mo.ui.radio(
-        options=["train", "resume"], value="train", label="Drill phase (session 1 / session 2)"
+    mo.vstack(
+        [
+            mo.md("The token stays in this session's memory and is not saved in the notebook."),
+            token_input,
+        ]
     )
-    phase
-    return (phase,)
+    return (token_input,)
 
 
 @app.cell
-def _(HUB_REPO, RUN_ID, mo, phase):
+def _(HUB_REPO, mo, token_input):
+    import os
+
+    from hamic.checkpoint import HuggingFaceObjectStore
+
+    hub_token = token_input.value.strip() or os.environ.get("HF_TOKEN", "")
+    mo.stop(not hub_token, mo.md("**Enter a Hugging Face token above** to continue."))
+    if "<" in HUB_REPO:
+        raise ValueError("Set HUB_REPO to your private Hugging Face repository first")
+    store = HuggingFaceObjectStore(HUB_REPO, private=True, token=hub_token)
+    account = store.whoami()
+    phase = mo.ui.radio(
+        options=["train", "resume"], value="train", label="Drill phase (session 1 / session 2)"
+    )
+    mo.vstack([mo.md(f"Hub account **{account}** · run store `{HUB_REPO}`"), phase])
+    return phase, store
+
+
+@app.cell
+def _(RUN_ID, mo, phase, store):
     import tempfile
     from pathlib import Path
 
-    from hamic.checkpoint import HuggingFaceObjectStore
     from hamic.training import SmokeConfig, run_smoke
 
-    store = HuggingFaceObjectStore(HUB_REPO, private=True)
     workdir = Path(tempfile.mkdtemp(prefix="hamic-drill-"))
     config = SmokeConfig(run_id=RUN_ID, steps=12, checkpoint_every=4)
     stop_after = 6 if phase.value == "train" else None
