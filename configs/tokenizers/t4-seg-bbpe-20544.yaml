@@ -1,4 +1,4 @@
-# Tokenizer ablation candidate (see docs/data/tokenizer-and-pipeline.md).
+# Tokenizer candidate for the HAMIC tokenizer ablation.
 name: t4-seg-bbpe-20544
 vocab_size: 20544
 input_mode: segmented

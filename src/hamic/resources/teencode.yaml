@@ -1,0 +1,98 @@
+# Vietnamese "teencode" (social-media spelling) used to build robustness test inputs.
+# Synthetic perturbation for evaluation only: never applied to training data, and no
+# substitute for real social-media benchmarks.
+version: 1
+
+# Whole words and phrases (lower case, NFC). The first variant is the most common one and
+# is used when a transform runs without randomness. Phrases are matched before words.
+words:
+  không: [ko, k, hông, hok, khum, kh]
+  được: [dc, đc, đk, dk]
+  gì: [j, gì]
+  biết: [bít, bik, bit]
+  vậy: [z, v, zậy, vại]
+  rồi: [r, rùi, roài]
+  với: [vs, vớ]
+  mình: [mk, mik, mìn]
+  bạn: [bn, b, pạn]
+  yêu: [iu, iêu]
+  nhiều: [nhìu, nh]
+  người: [ng, ngừi]
+  chồng: [ck]
+  vợ: [vk]
+  anh: [a]
+  em: [e]
+  chị: [c]
+  cũng: [cg, cũg]
+  trước: [trc]
+  như: [nhu, nhw]
+  sao: [s, sa]
+  thôi: [thui, thoy]
+  quá: [wá, qá, wóa]
+  nhé: [nha, nhá, nhoa]
+  ừ: [uk, ừa, ừm]
+  ok: [oke, okie, oki]
+  luôn: [lun]
+  muốn: [mún]
+  hiểu: [hỉu]
+  nhiêu: [nhiu]
+  chưa: [chx]
+  nữa: [nx]
+  thật: [thiệt]
+  có: [cóa, coá]
+  này: [nài, nì]
+  đấy: [đấyy, đới]
+  mày: [m]
+  tao: [t]
+  vâng: [vg]
+  về: [zề]
+  vào: [zô, vô]
+  thương: [thươg]
+  làm: [lm]
+  lắm: [lém]
+  đi: [đii, di]
+  hả: [hở, há]
+  ơi: [ơiii, ơy]
+  thế: [thế]
+  vui: [zui]
+  dễ: [zễ]
+
+phrases:
+  như thế nào: [ntn]
+  thế nào: [tn, thế nào]
+  không biết: [kbt, ko bít]
+  không có: [kco, ko có]
+  cảm ơn: [cmơn, tks, thanks]
+  xin lỗi: [sr, sorry, xl]
+  bây giờ: [bh, bjo, bâyh]
+  bao giờ: [bh, bjo]
+  hôm nay: [hnay, hn]
+  ngày mai: [nmai]
+  trả lời: [tl, rep]
+  tin nhắn: [tn, ib]
+  vui vẻ: [vv]
+  dễ thương: [dth, zễ thươg]
+  tại sao: [tsao]
+  đúng rồi: [đr, đúg r]
+  mọi người: [mn, mng]
+  gia đình: [gđ]
+  học sinh: [hs]
+  sinh viên: [sv]
+  giáo viên: [gv]
+  điện thoại: [đt, dt]
+  bình thường: [bt, bth]
+  tình yêu: [ty, tình iu]
+  ngủ ngon: [g9]
+  gì đấy: [j đấy]
+
+# Syllable rules, applied in order, each with probability `rule_rate * weight` when enabled.
+# `pattern` is a Python regex on the lower-cased syllable.
+rules:
+  - {name: ph_to_f, pattern: "^ph", replace: "f"}
+  - {name: gi_to_j, pattern: "^gi", replace: "j"}
+  - {name: qu_to_w, pattern: "^qu", replace: "w"}
+  - {name: d_to_z, pattern: "^d(?!đ)", replace: "z"}
+  - {name: ch_final_to_k, pattern: "ch$", replace: "k"}
+  - {name: ng_final_to_g, pattern: "ng$", replace: "g"}
+  - {name: strip_diacritics, kind: strip_diacritics}
+  - {name: elongate, kind: elongate, min_repeat: 1, max_repeat: 3, weight: 0.25}

@@ -1,4 +1,5 @@
-# Tokenizer ablation candidate (see docs/data/tokenizer-and-pipeline.md).
+# Tokenizer candidate for the HAMIC tokenizer ablation.
+# Status: Control tokenizer for the model-proxy comparison against t1.
 name: t2-bbpe-32k
 vocab_size: 32000
 input_mode: raw

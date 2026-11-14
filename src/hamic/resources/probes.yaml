@@ -1,0 +1,230 @@
+# Probe strings for the tokenizer acceptance suite. Each category targets a known way
+# tokenizers mis-split Vietnamese. Results are reported per category, so keep categories
+# balanced and add items rather than rewrite them (bump `version` on any change).
+version: 1
+
+# Person names are generated as surname + middle + given combinations (common name parts,
+# not real individuals), plus a few historical figures.
+person_name_parts:
+  surnames: [Nguyễn, Trần, Lê, Phạm, Hoàng, Huỳnh, Phan, Vũ, Võ, Đặng, Bùi, Đỗ, Hồ, Ngô, Dương, Lý]
+  middle: [Văn, Thị, Đức, Minh, Ngọc, Thanh, Hữu, Quốc, Thu, Gia]
+  given: [An, Bình, Châu, Dũng, Giang, Hạnh, Khánh, Linh, Nhung, Phương, Quân, Thảo, Trung, Tuấn, Yến, Hiếu, Khoa, Trâm, Vy, Huy]
+  count: 48
+
+categories:
+  historical_figures:
+    - Trần Hưng Đạo
+    - Lý Thường Kiệt
+    - Nguyễn Trãi
+    - Lê Lợi
+    - Hai Bà Trưng
+    - Võ Nguyên Giáp
+    - Hồ Xuân Hương
+    - Nguyễn Du
+    - Chu Văn An
+    - Ngô Quyền
+
+  # The 34 provincial-level units after the 2025 reorganisation, then former provinces
+  # and common spellings that remain in older text.
+  place_names:
+    - Hà Nội
+    - Huế
+    - Hải Phòng
+    - Đà Nẵng
+    - Thành phố Hồ Chí Minh
+    - Cần Thơ
+    - Lai Châu
+    - Điện Biên
+    - Sơn La
+    - Lạng Sơn
+    - Quảng Ninh
+    - Thanh Hóa
+    - Nghệ An
+    - Hà Tĩnh
+    - Cao Bằng
+    - Tuyên Quang
+    - Lào Cai
+    - Thái Nguyên
+    - Phú Thọ
+    - Bắc Ninh
+    - Hưng Yên
+    - Ninh Bình
+    - Quảng Trị
+    - Quảng Ngãi
+    - Gia Lai
+    - Khánh Hòa
+    - Lâm Đồng
+    - Đắk Lắk
+    - Đồng Nai
+    - Tây Ninh
+    - Vĩnh Long
+    - Đồng Tháp
+    - Cà Mau
+    - An Giang
+    - Bà Rịa – Vũng Tàu
+    - Bình Dương
+    - Kon Tum
+    - Đắk Nông
+    - Quảng Bình
+    - Thừa Thiên Huế
+    - Kiên Giang
+    - Sóc Trăng
+    - Bạc Liêu
+    - Hà Giang
+    - Yên Bái
+    - Vĩnh Phúc
+    - Hải Dương
+    - Thái Bình
+    - Nam Định
+    - Hà Nam
+    - Ninh Thuận
+    - Bình Thuận
+    - Phú Yên
+    - Bình Định
+    - Quảng Nam
+    - Long An
+    - Tiền Giang
+    - Bến Tre
+    - Trà Vinh
+    - Hậu Giang
+    - Bình Phước
+    - Bắc Giang
+    - Bắc Kạn
+    - Hòa Bình
+    - Phú Quốc
+    - Sa Pa
+    - Buôn Ma Thuột
+
+  multi_syllable_terms:
+    - trí tuệ nhân tạo
+    - bảo hiểm xã hội
+    - cơ sở dữ liệu
+    - biến đổi khí hậu
+    - học máy
+    - xử lý ngôn ngữ tự nhiên
+    - mạng nơ-ron
+    - ngân hàng nhà nước
+    - thuế thu nhập cá nhân
+    - bộ luật dân sự
+    - quyền sở hữu trí tuệ
+    - căn cước công dân
+    - đại học quốc gia
+    - bệnh viện đa khoa
+    - viêm phổi
+    - tiểu đường
+    - huyết áp cao
+    - kháng sinh
+    - hệ điều hành
+    - điện toán đám mây
+    - năng lượng tái tạo
+    - kinh tế vĩ mô
+    - lạm phát
+    - tỷ giá hối đoái
+    - nông nghiệp công nghệ cao
+    - di sản văn hóa phi vật thể
+    - nghị định chính phủ
+    - ủy ban nhân dân
+    - hội đồng nhân dân
+    - sở giáo dục và đào tạo
+
+  tone_placement:
+    - hoà bình
+    - hòa bình
+    - thuỷ điện
+    - thủy điện
+    - khoẻ mạnh
+    - khỏe mạnh
+    - lựa chọn hoá học
+    - lựa chọn hóa học
+    - tuỳ chọn
+    - tùy chọn
+
+  code_switch:
+    - mai check mail rồi gửi file nhé
+    - deadline tuần này gấp lắm
+    - team mình họp online lúc 9h
+    - em đang làm task review code
+    - báo cáo KPI quý này
+    - feedback của khách hàng rất tốt
+    - update app lên version mới
+    - chị ơi cho em xin link meeting
+    - sale off 50% cuối tuần
+    - laptop bị lag quá
+
+  numbers_money_dates:
+    - 1.500.000đ
+    - 2,5 triệu đồng
+    - 120.000 VNĐ
+    - 3,14
+    - 25/12/2026
+    - ngày 2 tháng 9 năm 1945
+    - 15%
+    - 0,5 m²
+    - 37,5°C
+    - 1.234.567.890
+    - 08:30
+    - 2026-11-15
+    - số 12A Lý Thường Kiệt
+    - quý III/2026
+    - 1/3 dân số
+
+  urls_email:
+    - https://vi.wikipedia.org/wiki/Việt_Nam
+    - www.example.vn/tin-tuc/2026
+    - lien.he@vi-du.vn
+    - https://github.com/HaianCao/HAMIC-LM
+    - http://thanhpho.gov.vn/van-ban?id=123
+
+  emoji:
+    - đẹp quá 😍😍
+    - cảm ơn 🙏
+    - haha 😂😂😂
+    - buồn ghê 😢
+    - ok 👍
+    - Việt Nam 🇻🇳 vô địch
+    - yêu ❤️ nhiều
+
+  math:
+    - x² + y² = z²
+    - ∑ aᵢ ≤ 10
+    - f(x) = 2x + 1
+    - √2 ≈ 1,414
+    - α + β = 90°
+    - P(A ∩ B) = 0,3
+
+  code:
+    - "def tinh_tong(a, b):\n    return a + b"
+    - "for (int i = 0; i < n; i++) { tong += a[i]; }"
+    - "SELECT ho_ten FROM sinh_vien WHERE diem > 8;"
+    - "import numpy as np"
+
+  elongation:
+    - đẹpppp quáaaa
+    - hayyyy
+    - trờiii ơiiii
+    - nooo
+    - vuiiii quá
+
+# Natural sentences from which the `no_diacritics` and `teencode` categories are derived
+# automatically (see hamic.tokenization.probes).
+base_sentences:
+  - Hôm nay tôi không biết phải làm gì cả.
+  - Bạn có muốn đi ăn phở với mình không?
+  - Cảm ơn mọi người đã giúp đỡ em rất nhiều.
+  - Sinh viên năm nhất cần đăng ký học phần trước thứ hai.
+  - Thời tiết Hà Nội hôm nay khá lạnh và có mưa phùn.
+  - Em yêu anh nhiều lắm, đừng giận em nữa nhé.
+  - Giá vàng hôm nay tăng mạnh so với tuần trước.
+  - Bây giờ mình đang ở nhà, tối nay gọi điện thoại sau nhé.
+  - Không có gì đâu, chuyện bình thường thôi mà.
+  - Tại sao bạn lại trả lời tin nhắn chậm như vậy?
+  - Học sinh tiểu học được nghỉ hè từ đầu tháng sáu.
+  - Mọi người trong gia đình đều khỏe mạnh và vui vẻ.
+  - Quán cà phê này dễ thương quá, lần sau mình quay lại.
+  - Chúc cả nhà ngủ ngon và có một ngày mai thật tốt đẹp.
+  - Giáo viên chủ nhiệm đã gửi thông báo cho phụ huynh.
+  - Xin lỗi vì đã đến muộn, đường hôm nay tắc quá.
+  - Anh ấy làm việc ở một công ty phần mềm tại Đà Nẵng.
+  - Món này phải nấu như thế nào thì mới ngon?
+  - Đúng rồi, chúng ta nên bắt đầu từ những việc nhỏ.
+  - Ngày mai lớp mình được nghỉ, vui quá đi thôi.

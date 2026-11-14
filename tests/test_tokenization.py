@@ -82,3 +82,23 @@ def test_comparison_table_lists_every_report(tiny_tokenizer, corpus):
     assert "| tiny |" in table
     assert "| copy |" in table
     assert "place_names" in table
+
+
+def test_probe_set_is_built_from_resources():
+    from hamic.tokenization import load_probes
+
+    probes = load_probes()
+    cats = probes.categories
+    assert len(cats["person_names"]) == 48
+    assert len(set(cats["person_names"])) == 48
+    assert "Đắk Lắk" in cats["place_names"]
+    assert len(cats["place_names"]) >= 60
+    assert all(s.isascii() or "đ" not in s for s in cats["no_diacritics"])
+    assert cats["teencode"] == load_probes().categories["teencode"]  # seeded, reproducible
+    assert probes.identity["probes"]["version"] == 1
+    assert len(probes.identity["probes"]["sha256"]) == 64
+
+
+def test_report_records_probe_identity(tiny_tokenizer, corpus):
+    report = TokenizerEvaluator(tiny_tokenizer, "tiny").run(corpus[:2]).to_dict()
+    assert report["probe_set"]["teencode"]["name"] == "teencode.yaml"

@@ -1,4 +1,5 @@
-# Tokenizer ablation candidate (see docs/data/tokenizer-and-pipeline.md).
+# Tokenizer candidate for the HAMIC tokenizer ablation.
+# Status: Dropped after pilot v0.1 (near-identical to t1); kept for reproducibility.
 name: t0-bbpe-20481
 vocab_size: 20481
 input_mode: raw

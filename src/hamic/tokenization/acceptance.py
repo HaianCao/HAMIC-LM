@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field
 from statistics import mean
 from typing import Any, Protocol
 
-from hamic.tokenization.probes import PROBES
+from hamic.tokenization.probes import ProbeSet, load_probes
 
 __all__ = ["AcceptanceReport", "CorpusMetrics", "EncodedText", "TokenizerEvaluator"]
 
@@ -135,6 +135,7 @@ class AcceptanceReport:
     vocab_size: int
     corpus: CorpusMetrics
     probes: dict[str, dict[str, Any]] = field(default_factory=dict)
+    probe_set: dict[str, Any] = field(default_factory=dict)
 
     @property
     def passed_hard_gates(self) -> bool:
@@ -150,16 +151,18 @@ class AcceptanceReport:
             "passed_hard_gates": self.passed_hard_gates,
             "corpus": self.corpus.to_dict(),
             "probes": self.probes,
+            "probe_set": self.probe_set,
         }
 
 
 class TokenizerEvaluator:
     """Run the acceptance suite against a ``tokenizers.Tokenizer``."""
 
-    def __init__(self, tokenizer: Any, name: str) -> None:
+    def __init__(self, tokenizer: Any, name: str, probes: ProbeSet | None = None) -> None:
         self._enc: _Encoder = _TokenizersAdapter(tokenizer)
         self._vocab_size = int(tokenizer.get_vocab_size())
         self._name = name
+        self._probes = probes or load_probes()
         # Decided once per vocabulary entry instead of once per token occurrence.
         self._partial_ids = frozenset(
             i for i in range(self._vocab_size) if not self._is_complete_utf8(i)
@@ -222,9 +225,10 @@ class TokenizerEvaluator:
         return True
 
     def evaluate_probes(
-        self, probes: Mapping[str, Sequence[str]] = PROBES
+        self, probes: Mapping[str, Sequence[str]] | None = None
     ) -> dict[str, dict[str, Any]]:
         """Return per-category fertility and examples of how probes are split."""
+        probes = probes if probes is not None else self._probes.categories
         result: dict[str, dict[str, Any]] = {}
         for category, items in probes.items():
             ratios: list[float] = []
@@ -252,4 +256,5 @@ class TokenizerEvaluator:
             vocab_size=self._vocab_size,
             corpus=self.evaluate_corpus(texts),
             probes=self.evaluate_probes(),
+            probe_set=dict(self._probes.identity),
         )

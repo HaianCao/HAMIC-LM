@@ -1,4 +1,5 @@
-# Tokenizer ablation candidate (see docs/data/tokenizer-and-pipeline.md).
+# Tokenizer candidate for the HAMIC tokenizer ablation.
+# Status: Working tokenizer (decision D-004, 15/11/2026).
 name: t1-bbpe-20544
 vocab_size: 20544
 input_mode: raw
