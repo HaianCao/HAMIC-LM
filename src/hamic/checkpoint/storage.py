@@ -7,7 +7,9 @@ interchangeable.
 
 from __future__ import annotations
 
+import os
 import shutil
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +45,10 @@ class ObjectStore(Protocol):
 
     def download(self, remote_path: str, destination: Path) -> Path:
         """Download an object to ``destination`` and return the path."""
+        ...
+
+    def download_prefix(self, prefix: str, destination: Path, max_workers: int = 8) -> Path:
+        """Download every object under ``prefix`` into a new directory ``destination``."""
         ...
 
     def list_files(self, prefix: str) -> list[str]:
@@ -91,6 +97,17 @@ class LocalObjectStore:
         """Copy an object out of the store."""
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(self._path(remote_path), destination)
+        return destination
+
+    def download_prefix(self, prefix: str, destination: Path, max_workers: int = 8) -> Path:
+        """Copy every object under ``prefix`` into ``destination``."""
+        del max_workers
+        if destination.exists():
+            raise FileExistsError(f"Destination already exists: {destination}")
+        source = self._path(prefix)
+        if not source.is_dir():
+            raise FileNotFoundError(f"Nothing found under {prefix!r}")
+        shutil.copytree(source, destination)
         return destination
 
     def list_files(self, prefix: str) -> list[str]:
@@ -183,11 +200,42 @@ class HuggingFaceObjectStore:
             return None
         return Path(path).read_bytes()
 
-    def download(self, remote_path: str, destination: Path) -> Path:
-        """Download a file to ``destination``."""
-        cached = self._api.hf_hub_download(self.repo_id, remote_path, repo_type=self.repo_type)
+    def _staging(self, destination: Path) -> Path:
+        # Same filesystem as the destination, so the final move is a rename, not a copy.
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(cached, destination)
+        return Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
+
+    def download(self, remote_path: str, destination: Path) -> Path:
+        """Download a file straight to ``destination`` (no Hub cache, no extra copy)."""
+        staging = self._staging(destination)
+        try:
+            fetched = self._api.hf_hub_download(
+                self.repo_id, remote_path, repo_type=self.repo_type, local_dir=staging
+            )
+            os.replace(fetched, destination)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        return destination
+
+    def download_prefix(self, prefix: str, destination: Path, max_workers: int = 8) -> Path:
+        """Download every file under ``prefix`` in parallel into ``destination``."""
+        if destination.exists():
+            raise FileExistsError(f"Destination already exists: {destination}")
+        staging = self._staging(destination)
+        try:
+            self._api.snapshot_download(
+                self.repo_id,
+                repo_type=self.repo_type,
+                allow_patterns=[f"{prefix.rstrip('/')}/*"],
+                local_dir=staging,
+                max_workers=max_workers,
+            )
+            source = staging / prefix.rstrip("/")
+            if not source.is_dir():
+                raise FileNotFoundError(f"Nothing found under {prefix!r} in {self.repo_id}")
+            os.replace(source, destination)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
         return destination
 
     def list_files(self, prefix: str) -> list[str]:

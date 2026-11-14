@@ -135,14 +135,11 @@ class CheckpointResolver:
     def download(self, checkpoint: RemoteCheckpoint, destination: str | Path) -> Path:
         """Download ``checkpoint`` and verify it locally; raise on any mismatch."""
         target = Path(destination)
-        manifest_bytes = self.store.read_bytes(f"{checkpoint.prefix}/{MANIFEST_NAME}")
-        marker_bytes = self.store.read_bytes(f"{checkpoint.prefix}/{COMMIT_NAME}")
-        if manifest_bytes is None or marker_bytes is None:
-            raise CheckpointError(f"{checkpoint.prefix} is not committed")
-        for entry in parse_manifest(manifest_bytes):
-            self.store.download(f"{checkpoint.prefix}/{entry.path}", target / entry.path)
-        (target / MANIFEST_NAME).write_bytes(manifest_bytes)
-        (target / COMMIT_NAME).write_bytes(marker_bytes)
+        try:
+            # One parallel transfer for the whole prefix; integrity is checked afterwards.
+            self.store.download_prefix(checkpoint.prefix, target)
+        except FileNotFoundError as exc:
+            raise CheckpointError(f"{checkpoint.prefix} has no files") from exc
         verify_local(target)
         return target
 
