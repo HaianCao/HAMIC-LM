@@ -12,9 +12,11 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
+    "code_revision",
     "environment_fingerprint",
     "file_sha256",
     "git_revision",
+    "installed_revision",
     "json_sha256",
     "utc_now",
 ]
@@ -61,6 +63,49 @@ def git_revision(cwd: str | Path | None = None) -> dict[str, Any]:
     except (OSError, subprocess.CalledProcessError):
         return {"commit": None, "dirty": None}
     return {"commit": commit, "dirty": bool(status.strip())}
+
+
+def installed_revision(package: str = "hamic") -> dict[str, Any]:
+    """Return the Git commit pip recorded when ``package`` was installed from a VCS URL.
+
+    pip writes ``direct_url.json`` (PEP 610) with the resolved ``commit_id`` even when
+    the requested revision was a branch such as ``main``.
+    """
+    try:
+        raw = metadata.distribution(package).read_text("direct_url.json")
+    except metadata.PackageNotFoundError:
+        raw = None
+    data = json.loads(raw) if raw else {}
+    vcs = data.get("vcs_info", {})
+    return {
+        "commit": vcs.get("commit_id"),
+        "requested_revision": vcs.get("requested_revision"),
+        "url": data.get("url"),
+    }
+
+
+def code_revision() -> dict[str, Any]:
+    """Return the commit of the HAMIC code that is running, wherever it came from.
+
+    A source checkout is identified with Git (run inside the package directory, never the
+    caller's working directory); an installed package falls back to pip's record.
+
+    Returns:
+        ``{"commit", "dirty", "source", "requested_revision"}`` where ``source`` is
+        ``"git"``, ``"pip"`` or ``"unknown"``.
+    """
+    revision = git_revision(Path(__file__).resolve().parent)
+    if revision["commit"]:
+        return {**revision, "source": "git", "requested_revision": None}
+    installed = installed_revision()
+    if installed["commit"]:
+        return {
+            "commit": installed["commit"],
+            "dirty": False,
+            "source": "pip",
+            "requested_revision": installed["requested_revision"],
+        }
+    return {"commit": None, "dirty": None, "source": "unknown", "requested_revision": None}
 
 
 def environment_fingerprint() -> dict[str, Any]:

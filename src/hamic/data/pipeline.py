@@ -20,7 +20,7 @@ from hamic.data.stages import (
     SplitStage,
     Stage,
 )
-from hamic.provenance import environment_fingerprint, file_sha256, git_revision, utc_now
+from hamic.provenance import code_revision, environment_fingerprint, file_sha256, utc_now
 
 __all__ = ["CorpusPipeline", "PipelineResult", "default_stages"]
 
@@ -168,7 +168,7 @@ class CorpusPipeline:
                 }
                 for name, w in writers.items()
             },
-            "code": git_revision(),
+            "code": code_revision(),
             "environment": environment_fingerprint(),
         }
         with (out / MANIFEST_NAME).open("w", encoding="utf-8") as stream_out:

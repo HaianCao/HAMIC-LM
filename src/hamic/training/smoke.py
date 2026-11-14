@@ -18,7 +18,8 @@ from hamic.checkpoint.remote import CheckpointPublisher, CheckpointResolver
 from hamic.checkpoint.storage import ObjectStore
 from hamic.modeling.factory import build_model
 from hamic.modeling.presets import Architecture, ModelPreset
-from hamic.provenance import environment_fingerprint, git_revision, json_sha256
+from hamic.provenance import code_revision, environment_fingerprint, json_sha256
+from hamic.training.compat import check_strict_resume
 from hamic.training.state import (
     SAVED_STATE,
     DataCursor,
@@ -91,6 +92,8 @@ class SmokeResult:
     resumed_from_step: int | None
     final_step: int
     published_steps: list[int]
+    code_commit: str | None = None
+    warnings: list[str] = field(default_factory=list)
 
 
 def run_smoke(
@@ -124,7 +127,10 @@ def run_smoke(
     if restore_dir.exists():
         shutil.rmtree(restore_dir)
     restored = CheckpointResolver(store, run_prefix).restore_latest(restore_dir)
+    current = _metadata(cfg, 0, None)
+    warnings: list[str] = []
     if restored is not None:
+        warnings = check_strict_resume(restored.metadata, current)
         cursor = load_training_state(restore_dir, model, optimizer, scheduler)
         start = restored.step
     else:
@@ -163,6 +169,8 @@ def run_smoke(
         resumed_from_step=restored.step if restored else None,
         final_step=max(losses, default=start),
         published_steps=published,
+        code_commit=current["code_revision"]["commit"],
+        warnings=warnings,
     )
 
 
@@ -172,7 +180,7 @@ def _metadata(cfg: SmokeConfig, global_step: int, restored: Any) -> dict[str, An
         "run_id": cfg.run_id,
         "global_step": global_step,
         "config_sha256": cfg.fingerprint(),
-        "code_revision": git_revision(),
+        "code_revision": code_revision(),
         "environment": environment_fingerprint(),
         "resumed_from": restored.prefix if restored else None,
         "saved_state": SAVED_STATE,

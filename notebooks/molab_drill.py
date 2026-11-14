@@ -26,7 +26,8 @@ def _():
     mo.md(
         """
         # HAMIC · Molab readiness drill
-        Edit `HAMIC_SOURCE` and `HUB_REPO` in the next cell, then run the cells in order.
+        Check `HAMIC_SOURCE`, `HUB_REPO` and `RUN_ID` in the next cell, then run the cells
+        in order. After pushing new code, restart the kernel and run again.
         """
     )
     return (mo,)
@@ -34,27 +35,53 @@ def _():
 
 @app.cell
 def _():
-    # Pin an exact commit; an unpinned branch makes the run irreproducible.
-    HAMIC_SOURCE = "git+https://github.com/HaianCao/HAMIC-LM@<commit-sha>"
-    HUB_REPO = "<hf-namespace>/hamic-runs"
-    RUN_ID = "drill-001"
+    # Any Git ref works after "@": a branch (main), a tag (v0.1.0) or a commit SHA.
+    # The resolved commit is always recorded, so a branch stays reproducible; pin a tag or
+    # SHA for long runs so every session of the run uses the same code.
+    HAMIC_SOURCE = "git+https://github.com/HaianCao/HAMIC-LM@main"
+    HUB_REPO = "HaianCao/hamic-runs"
+    RUN_ID = "drill-002"  # use a new id per drill; a finished run cannot be resumed
     return HAMIC_SOURCE, HUB_REPO, RUN_ID
 
 
 @app.cell
-def _(HAMIC_SOURCE):
+def _(HAMIC_SOURCE, mo):
+    import json
     import subprocess
     import sys
+    from importlib import metadata
 
-    if "<" in HAMIC_SOURCE:
-        raise ValueError("Set HAMIC_SOURCE to a pinned commit before installing")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", HAMIC_SOURCE], check=True)
-    return
+    requested_ref = HAMIC_SOURCE.rsplit("@", 1)[-1]
+    pip = [sys.executable, "-m", "pip", "install", "-q"]
+    subprocess.run([*pip, HAMIC_SOURCE], check=True)  # dependencies
+    # Every dev build has the same version number, so pip would otherwise keep an
+    # older commit that is already installed.
+    subprocess.run([*pip, "--force-reinstall", "--no-deps", HAMIC_SOURCE], check=True)
+    direct_url = json.loads(metadata.distribution("hamic").read_text("direct_url.json") or "{}")
+    installed_commit = direct_url.get("vcs_info", {}).get("commit_id", "")
+    if not installed_commit:
+        raise RuntimeError("pip did not record the installed commit (direct_url.json)")
+    is_hex = all(c in "0123456789abcdef" for c in requested_ref)
+    looks_like_sha = len(requested_ref) >= 7 and is_hex
+    if looks_like_sha and not installed_commit.startswith(requested_ref):
+        raise RuntimeError(f"Installed commit {installed_commit!r}, expected {requested_ref!r}")
+    mo.stop(
+        "hamic" in sys.modules,
+        mo.md(
+            f"Installed `hamic` at `{installed_commit[:12]}`, but an older copy is already "
+            "imported in this kernel. **Restart the kernel**, then run the notebook again."
+        ),
+    )
+    hamic_ready = installed_commit
+    mo.md(f"`hamic` installed from `@{requested_ref}` at commit `{installed_commit[:12]}`")
+    return (hamic_ready,)
 
 
 @app.cell
-def _(mo):
+def _(hamic_ready, mo):
     from hamic.runtime import probe_runtime
+
+    del hamic_ready  # dependency only: run after the install cell
 
     probe = probe_runtime("/tmp")
     if not probe["torch"].get("cuda_available"):
@@ -97,7 +124,7 @@ def _(mo):
 
 
 @app.cell
-def _(HUB_REPO, mo, token_input):
+def _(HUB_REPO, hamic_ready, mo, token_input):
     import os
 
     from hamic.checkpoint import HuggingFaceObjectStore
@@ -111,7 +138,14 @@ def _(HUB_REPO, mo, token_input):
     phase = mo.ui.radio(
         options=["train", "resume"], value="train", label="Drill phase (session 1 / session 2)"
     )
-    mo.vstack([mo.md(f"Hub account **{account}** · run store `{HUB_REPO}`"), phase])
+    mo.vstack(
+        [
+            mo.md(
+                f"Hub account **{account}** · run store `{HUB_REPO}` · code `{hamic_ready[:12]}`"
+            ),
+            phase,
+        ]
+    )
     return phase, store
 
 
@@ -158,7 +192,9 @@ def _(RUN_ID, mo, phase, store):
     result = run_smoke(store, workdir / "run", config, stop_after_step=stop_after)
     mo.md(
         f"Phase **{phase.value}** · resumed from step `{result.resumed_from_step}` · "
-        f"published steps `{result.published_steps}` · final step `{result.final_step}`"
+        f"published steps `{result.published_steps}` · final step `{result.final_step}` · "
+        f"code `{(result.code_commit or 'unknown')[:12]}`"
+        + "".join(f"\n\n> Warning: {w}" for w in result.warnings)
     )
     return config, result, run_smoke, workdir
 
@@ -170,10 +206,21 @@ def _(config, mo, phase, result, run_smoke, workdir):
     mo.stop(phase.value != "resume")
     reference = run_smoke(LocalObjectStore(workdir / "reference-store"), workdir / "ref", config)
     identical = all(reference.losses[k] == v for k, v in result.losses.items())
-    mo.md(
-        "### Drill passed: strict resume reproduces the uninterrupted run"
-        if identical and result.resumed_from_step == 4
-        else "### Drill FAILED: compare the losses below"
+    rows = [
+        {"step": k, "resumed": v, "reference": reference.losses[k]}
+        for k, v in sorted(result.losses.items())
+    ]
+    for row in rows:
+        row["equal"] = row["resumed"] == row["reference"]
+    mo.vstack(
+        [
+            mo.md(
+                "### Drill passed: strict resume reproduces the uninterrupted run"
+                if identical and result.resumed_from_step == 4
+                else "### Drill FAILED: compare the losses below"
+            ),
+            mo.ui.table(rows, selection=None),
+        ]
     )
     return
 
