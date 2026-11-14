@@ -65,23 +65,17 @@ def _(mo):
 
 @app.cell
 def _(mo, probe):
-    import torch
+    from hamic.runtime import matmul_tflops
 
-    device = torch.device("cuda")
-    a = torch.randn(4096, 4096, device=device, dtype=torch.bfloat16)
-    torch.cuda.synchronize()
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    start.record()
-    for _ in range(20):
-        a @ a
-    end.record()
-    torch.cuda.synchronize()
-    seconds = start.elapsed_time(end) / 1000
-    tflops = 20 * 2 * 4096**3 / seconds / 1e12
-    mo.md(
-        f"BF16 matmul sanity check on **{probe['torch']['devices'][0]['name']}**: "
-        f"~{tflops:.0f} TFLOP/s (micro-benchmark, not training throughput)"
+    matmul = [matmul_tflops(size=n, dtype="bfloat16") for n in (4096, 8192)]
+    mo.vstack(
+        [
+            mo.md(
+                f"BF16 matmul on **{probe['torch']['devices'][0]['name']}** after warmup "
+                "(micro-benchmark, not training throughput):"
+            ),
+            mo.ui.table(matmul, selection=None),
+        ]
     )
     return
 
@@ -119,6 +113,36 @@ def _(HUB_REPO, mo, token_input):
     )
     mo.vstack([mo.md(f"Hub account **{account}** · run store `{HUB_REPO}`"), phase])
     return phase, store
+
+
+@app.cell
+def _(mo):
+    bench_size = mo.ui.dropdown(
+        options={"256 MiB": 256, "1 GiB": 1024, "2 GiB": 2048},
+        value="1 GiB",
+        label="Test file size",
+    )
+    bench_button = mo.ui.run_button(label="Measure Hub upload/download throughput")
+    mo.vstack(
+        [
+            mo.md(
+                "Checkpoint upload speed decides how often a long run can checkpoint. "
+                "The test file stays under `bench/` in the run repository."
+            ),
+            mo.hstack([bench_size, bench_button], justify="start"),
+        ]
+    )
+    return bench_button, bench_size
+
+
+@app.cell
+def _(bench_button, bench_size, mo, store):
+    from hamic.runtime import storage_throughput
+
+    mo.stop(not bench_button.value)
+    throughput = storage_throughput(store, size_mib=bench_size.value)
+    mo.json(throughput)
+    return
 
 
 @app.cell
