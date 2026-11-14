@@ -1,6 +1,7 @@
 """Tokenizer specification, training, export and acceptance testing."""
 
 from hamic.tokenization.acceptance import AcceptanceReport, CorpusMetrics, TokenizerEvaluator
+from hamic.tokenization.comparison import comparison_table
 from hamic.tokenization.probes import PROBES
 from hamic.tokenization.segmentation import DictionarySegmenter, PyviSegmenter, Segmenter
 from hamic.tokenization.spec import DigitMode, InputMode, SpecialTokens, TokenizerSpec
@@ -27,6 +28,7 @@ __all__ = [
     "TokenizerSpec",
     "TokenizerVocabularyError",
     "build_tokenizer",
+    "comparison_table",
     "export_tokenizer",
     "train_tokenizer",
 ]

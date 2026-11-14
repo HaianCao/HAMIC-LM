@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import os
 import sys
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -71,7 +72,7 @@ def _cmd_corpus_build(args: argparse.Namespace) -> int:
     with Path(args.sources).open(encoding="utf-8") as stream:
         source_items = yaml.safe_load(stream)["sources"]
     registry = SourceRegistry.from_yaml(args.registry)
-    result = CorpusPipeline(registry).run(
+    result = CorpusPipeline(registry, workers=args.workers).run(
         [_build_source(dict(item)) for item in source_items], args.out, args.version
     )
     _print_json({"output": str(result.output_dir), "documents": result.counts})
@@ -98,13 +99,21 @@ def _cmd_tokenizer_train(args: argparse.Namespace) -> int:
     return 0
 
 
+def _tokenizer_name(directory: Path) -> str:
+    """Spec name from ``hamic_tokenizer.json``, else the directory name."""
+    metadata = directory / "hamic_tokenizer.json"
+    if metadata.is_file():
+        return str(json.loads(metadata.read_text(encoding="utf-8"))["spec"]["name"])
+    return directory.name
+
+
 def _cmd_tokenizer_eval(args: argparse.Namespace) -> int:
     from tokenizers import Tokenizer
 
     from hamic.tokenization import TokenizerEvaluator
 
     tokenizer = Tokenizer.from_file(str(Path(args.tokenizer) / "tokenizer.json"))
-    report = TokenizerEvaluator(tokenizer, name=Path(args.tokenizer).name).run(
+    report = TokenizerEvaluator(tokenizer, name=_tokenizer_name(Path(args.tokenizer))).run(
         _texts(_expand(args.corpus), args.limit)
     )
     data = report.to_dict()
@@ -112,6 +121,14 @@ def _cmd_tokenizer_eval(args: argparse.Namespace) -> int:
         Path(args.out).write_text(json.dumps(data, ensure_ascii=False, indent=2), "utf-8")
     _print_json({k: v for k, v in data.items() if k != "probes"})
     return 0 if report.passed_hard_gates else 1
+
+
+def _cmd_tokenizer_compare(args: argparse.Namespace) -> int:
+    from hamic.tokenization import comparison_table
+
+    reports = [json.loads(Path(p).read_text(encoding="utf-8")) for p in args.reports]
+    print(comparison_table(reports))
+    return 0
 
 
 def _store(spec: str) -> Any:
@@ -165,6 +182,12 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--sources", required=True)
     build.add_argument("--out", required=True)
     build.add_argument("--version", required=True)
+    build.add_argument(
+        "--workers",
+        type=int,
+        default=max(1, (os.cpu_count() or 2) - 2),
+        help="worker processes for normalize/PII/quality/MinHash (1 = serial)",
+    )
     build.set_defaults(func=_cmd_corpus_build)
 
     tok = sub.add_parser("tokenizer", help="tokenizer training and evaluation").add_subparsers(
@@ -187,6 +210,10 @@ def _parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--out")
     evaluate.add_argument("--limit", type=int, default=5000)
     evaluate.set_defaults(func=_cmd_tokenizer_eval)
+
+    compare = tok.add_parser("compare", help="print a Markdown comparison of eval reports")
+    compare.add_argument("reports", nargs="+")
+    compare.set_defaults(func=_cmd_tokenizer_compare)
 
     drill = sub.add_parser("drill", help="checkpoint/strict-resume recovery drill")
     drill.add_argument("--store", required=True, help="local:<dir> or hf:<namespace/repo>")

@@ -7,6 +7,7 @@ vocabularies can be compared on the same text.
 
 from __future__ import annotations
 
+import functools
 import time
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
@@ -56,6 +57,7 @@ class _TokenizersAdapter:
         return bytes(mapping[ch] for ch in token if ch in mapping)
 
 
+@functools.cache
 def _byte_level_inverse() -> dict[str, int]:
     # GPT-2 byte-to-unicode table, inverted.
     printable = (
@@ -158,6 +160,10 @@ class TokenizerEvaluator:
         self._enc: _Encoder = _TokenizersAdapter(tokenizer)
         self._vocab_size = int(tokenizer.get_vocab_size())
         self._name = name
+        # Decided once per vocabulary entry instead of once per token occurrence.
+        self._partial_ids = frozenset(
+            i for i in range(self._vocab_size) if not self._is_complete_utf8(i)
+        )
 
     @staticmethod
     def _check_offsets(text: str, encoded: EncodedText) -> int:
@@ -202,9 +208,7 @@ class TokenizerEvaluator:
             if self._enc.encode(unicodedata.normalize("NFD", text)).ids != encoded.ids:
                 metrics.nfd_mismatches += 1
             metrics.offset_errors += self._check_offsets(text, encoded)
-            metrics.partial_byte_tokens += sum(
-                1 for i in encoded.ids if not self._is_complete_utf8(i)
-            )
+            metrics.partial_byte_tokens += sum(1 for i in encoded.ids if i in self._partial_ids)
         metrics.tokens_per_doc_p50 = _percentile(per_doc, 0.5)
         metrics.tokens_per_doc_p95 = _percentile(per_doc, 0.95)
         metrics.tokens_per_second = metrics.tokens / elapsed if elapsed else 0.0

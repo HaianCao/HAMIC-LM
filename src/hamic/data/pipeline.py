@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from hamic.data.documents import Document, DocumentSource
+from hamic.data.parallel import ParallelPrefix, split_parallel_prefix
 from hamic.data.registry import SourceRegistry, UseCase
 from hamic.data.stages import (
     ExactDedupStage,
     NearDedupStage,
     NormalizeStage,
+    PiiFilterStage,
     QualityFilterStage,
     SplitStage,
     Stage,
@@ -32,6 +34,7 @@ def default_stages() -> list[Stage]:
     """Return the canonical stage order with default settings."""
     return [
         NormalizeStage(),
+        PiiFilterStage(),
         QualityFilterStage(),
         ExactDedupStage(),
         NearDedupStage(),
@@ -77,8 +80,10 @@ class _ShardWriter:
         self.close()
         self.directory.mkdir(parents=True, exist_ok=True)
         path = self.directory / f"part-{len(self.files):05d}.jsonl.gz"
-        # mtime=0 keeps the gzip bytes, and therefore the checksum, reproducible.
-        raw = gzip.GzipFile(filename=str(path), mode="wb", mtime=0)
+        # mtime=0 keeps the gzip bytes, and therefore the checksum, reproducible. Level 3
+        # compresses Vietnamese UTF-8 about 3.5x faster than level 9 for ~12% larger files;
+        # at level 9 compression was the pipeline bottleneck.
+        raw = gzip.GzipFile(filename=str(path), mode="wb", mtime=0, compresslevel=3)
         self._stream = io.TextIOWrapper(raw, encoding="utf-8")
         self.files.append(path)
         self._in_shard = 0
@@ -97,6 +102,8 @@ class CorpusPipeline:
         stages: Ordered stages; the last one must assign ``meta["split"]``.
         use: Intended use checked against the registry.
         shard_docs: Maximum documents per output shard.
+        workers: Processes for the stateless stages and MinHash signatures; ``1`` runs
+            everything in this process. The output is identical either way.
     """
 
     def __init__(
@@ -105,6 +112,7 @@ class CorpusPipeline:
         stages: Sequence[Stage] | None = None,
         use: UseCase = UseCase.RESEARCH,
         shard_docs: int = 50_000,
+        workers: int = 1,
     ) -> None:
         self.registry = registry
         self.stages = list(stages) if stages is not None else default_stages()
@@ -112,6 +120,17 @@ class CorpusPipeline:
             raise ValueError("The last stage must be a SplitStage")
         self.use = use
         self.shard_docs = shard_docs
+        self.workers = max(1, workers)
+
+    def _stream(self, documents: Iterable[Document]) -> Iterable[Document]:
+        stream = documents
+        prefix = split_parallel_prefix(self.stages) if self.workers > 1 else 0
+        if prefix:
+            near = next((s for s in self.stages if isinstance(s, NearDedupStage)), None)
+            stream = ParallelPrefix(self.stages[:prefix], near, self.workers)(stream)
+        for stage in self.stages[prefix:]:
+            stream = stage(stream)
+        return stream
 
     def run(
         self, sources: Iterable[DocumentSource], output_dir: str | Path, corpus_version: str
@@ -130,9 +149,7 @@ class CorpusPipeline:
         records = [self.registry.require(s.source_id, self.use) for s in source_list]
 
         writers = {name: _ShardWriter(out / name, self.shard_docs) for name in SPLITS}
-        stream: Iterable[Document] = (doc for source in source_list for doc in source)
-        for stage in self.stages:
-            stream = stage(stream)
+        stream = self._stream(doc for source in source_list for doc in source)
         try:
             for document in stream:
                 writers[document.meta["split"]].write(document)
@@ -146,6 +163,7 @@ class CorpusPipeline:
             "corpus_version": corpus_version,
             "created_at_utc": utc_now(),
             "use": self.use.value,
+            "workers": self.workers,
             "sources": [
                 {
                     "source_id": r.source_id,

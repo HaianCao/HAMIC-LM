@@ -72,3 +72,13 @@ def test_exported_decoder_tokenizer_has_no_trailing_eos(exported_tokenizers):
     ids = tokenizer("Thủ đô của Việt Nam là")["input_ids"]
     assert ids[0] == tokenizer.bos_token_id
     assert ids[-1] != tokenizer.eos_token_id
+
+
+def test_comparison_table_lists_every_report(tiny_tokenizer, corpus):
+    from hamic.tokenization import comparison_table
+
+    report = TokenizerEvaluator(tiny_tokenizer, "tiny").run(corpus[:4]).to_dict()
+    table = comparison_table([report, {**report, "tokenizer_name": "copy"}])
+    assert "| tiny |" in table
+    assert "| copy |" in table
+    assert "place_names" in table

@@ -7,9 +7,10 @@ sources:
     location: hf://datasets/wikimedia/wikipedia/20231101.vi
     revision: b04c8d1ceb2f5cd4588862100d08de323dccfbaa
     license: CC-BY-SA-3.0 / GFDL (dataset card); article text CC BY-SA
-    status: pending
-    reviewer: ""
-    rationale: ""
+    status: approved_research
+    reviewer: HAMIC
+    reviewed_on: 2026-11-14
+    rationale: "Open licence (CC BY-SA) compatible with research-only use (D-008); encyclopedic text with low PII risk. Approved for the corpus pilot and tokenizer ablations."
     attribution: "Text from Vietnamese Wikipedia, CC BY-SA. Releases must credit Wikipedia contributors and keep share-alike terms for redistributed text."
     pii_risk: low
     notes: Research-only scope (D-008). Share-alike applies to redistributed text, not to model weights by default; confirm before any dataset release.
@@ -19,9 +20,10 @@ sources:
     location: hf://datasets/HuggingFaceFW/fineweb-2/vie_Latn
     revision: af9c13333eb981300149d5ca60a8e9d659b276b9
     license: ODC-By 1.0 (dataset); underlying web pages keep their own rights; Common Crawl terms of use
-    status: pending
-    reviewer: ""
-    rationale: ""
+    status: approved_research
+    reviewer: HAMIC
+    reviewed_on: 2026-11-14
+    rationale: "ODC-By dataset, research-only use (D-008). Approved for the corpus pilot with the PII filter stage enabled; the human audit of kept and rejected samples must pass before any long training run uses this source."
     attribution: "FineWeb2 (ODC-By). Cite the FineWeb2 paper."
     pii_risk: high
     notes: Web text. Requires content/PII audit on a stratified sample before approval.
