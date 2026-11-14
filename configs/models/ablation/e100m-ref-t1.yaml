@@ -1,0 +1,12 @@
+# Architecture-ablation preset (experiment config, not a release name).
+# Reference components (absolute positions, GELU, post-LN) with the t1 vocabulary;
+# 18 layers instead of 14 so parameters match HAMIC-E100M-M.
+name: HAMIC-E100M-ref-t1
+architecture: roberta
+label_parameters: 100000000.0
+num_layers: 18
+hidden_size: 640
+num_heads: 10
+intermediate_size: 2560
+vocab_size: 20544
+max_position_embeddings: 1024

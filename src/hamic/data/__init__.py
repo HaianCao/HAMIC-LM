@@ -1,5 +1,6 @@
 """Corpus governance and cleaning."""
 
+from hamic.data.config import NearDedupConfig, PipelineConfig
 from hamic.data.documents import (
     Document,
     DocumentSource,
@@ -37,9 +38,11 @@ __all__ = [
     "ExactDedupStage",
     "HuggingFaceStreamSource",
     "JsonlSource",
+    "NearDedupConfig",
     "NearDedupStage",
     "NormalizeStage",
     "PiiFilterStage",
+    "PipelineConfig",
     "PipelineResult",
     "QualityFilterConfig",
     "QualityFilterStage",

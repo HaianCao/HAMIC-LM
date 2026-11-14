@@ -1,0 +1,12 @@
+# Architecture-ablation preset (experiment config, not a release name).
+# Reference components with the t1 vocabulary; 18 layers instead of 16 so parameters
+# match HAMIC-E300M-M.
+name: HAMIC-E300M-ref-t1
+architecture: roberta
+label_parameters: 300000000.0
+num_layers: 18
+hidden_size: 1152
+num_heads: 18
+intermediate_size: 4096
+vocab_size: 20544
+max_position_embeddings: 1024

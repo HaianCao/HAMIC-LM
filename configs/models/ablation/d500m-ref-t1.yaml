@@ -1,0 +1,15 @@
+# Architecture-ablation preset (experiment config, not a release name).
+# Llama (no QK-Norm) with the t1 vocabulary and the exact HAMIC-D500M-M shape, so the
+# comparison isolates QK-Norm.
+name: HAMIC-D500M-ref-t1
+architecture: llama
+label_parameters: 500000000.0
+num_layers: 28
+hidden_size: 1280
+num_heads: 10
+num_kv_heads: 2
+head_dim: 128
+intermediate_size: 3584
+vocab_size: 20544
+max_position_embeddings: 2048
+rope_theta: 500000.0

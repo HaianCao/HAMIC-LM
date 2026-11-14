@@ -1,0 +1,33 @@
+# Corpus pipeline configuration. Every corpus manifest records these values and their
+# hash. Thresholds are provisional until the human audit of kept and rejected samples.
+version: 1
+name: default
+
+normalization:
+  unicode_form: NFC
+  unescape_html: true
+  strip_zero_width: true
+  collapse_whitespace: true
+
+pii_filter: true
+
+# Calibrated for Vietnamese: the mean syllable is ~3 characters, so English rules such
+# as "mean word length 3-10" would reject normal sentences.
+quality:
+  min_chars: 200
+  min_letter_ratio: 0.6
+  min_mean_syllable_chars: 1.5
+  max_mean_syllable_chars: 8.0
+  max_duplicate_line_ratio: 0.3
+
+near_dedup:
+  threshold: 0.8
+  num_perm: 128
+  shingle_size: 5
+
+split:
+  validation: 0.01
+  test: 0.01
+  seed: hamic-split-v1
+
+shard_docs: 50000

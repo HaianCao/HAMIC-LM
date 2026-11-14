@@ -67,12 +67,13 @@ def _build_source(item: dict[str, Any]) -> Any:
 
 
 def _cmd_corpus_build(args: argparse.Namespace) -> int:
-    from hamic.data import CorpusPipeline, SourceRegistry
+    from hamic.data import CorpusPipeline, PipelineConfig, SourceRegistry
 
     with Path(args.sources).open(encoding="utf-8") as stream:
         source_items = yaml.safe_load(stream)["sources"]
     registry = SourceRegistry.from_yaml(args.registry)
-    result = CorpusPipeline(registry, workers=args.workers).run(
+    config = PipelineConfig.from_yaml(args.config) if args.config else None
+    result = CorpusPipeline(registry, workers=args.workers, config=config).run(
         [_build_source(dict(item)) for item in source_items], args.out, args.version
     )
     _print_json({"output": str(result.output_dir), "documents": result.counts})
@@ -182,6 +183,7 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--sources", required=True)
     build.add_argument("--out", required=True)
     build.add_argument("--version", required=True)
+    build.add_argument("--config", help="pipeline configuration YAML (defaults if omitted)")
     build.add_argument(
         "--workers",
         type=int,

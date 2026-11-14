@@ -58,7 +58,7 @@ def test_encoder_rejects_grouped_query_attention():
 
 
 @pytest.mark.skipif(not PRESET_DIR.is_dir(), reason="model presets not present")
-@pytest.mark.parametrize("path", sorted(PRESET_DIR.glob("*.yaml")), ids=lambda p: p.stem)
+@pytest.mark.parametrize("path", sorted(PRESET_DIR.rglob("*.yaml")), ids=lambda p: p.stem)
 def test_presets_match_their_name(path):
     report = parameter_report(ModelPreset.from_yaml(path))
     assert report.within_label, report.to_dict()
@@ -93,3 +93,17 @@ def test_export_loads_with_plain_transformers(
     assert type(loaded).__name__ == build_config(preset).architectures[0]
     with pytest.raises(FileExistsError):
         export_pretrained(model, preset, exported_tokenizers[kind], out)
+
+
+ABLATION_PAIRS = ["e100m", "e300m", "d500m", "d1b"]
+
+
+@pytest.mark.skipif(not (PRESET_DIR / "ablation").is_dir(), reason="ablation presets not present")
+@pytest.mark.parametrize("family", ABLATION_PAIRS)
+def test_ablation_presets_match_modern_parameters(family):
+    ablation = parameter_report(
+        ModelPreset.from_yaml(PRESET_DIR / f"ablation/{family}-ref-t1.yaml")
+    )
+    modern = parameter_report(ModelPreset.from_yaml(PRESET_DIR / f"hamic-{family}-m.yaml"))
+    assert abs(ablation.total / modern.total - 1) < 0.01
+    assert ModelPreset.from_yaml(PRESET_DIR / f"ablation/{family}-ref-t1.yaml").vocab_size == 20544

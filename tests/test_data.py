@@ -258,3 +258,34 @@ def test_parallel_pipeline_matches_serial(tmp_path: Path):
         ]
     pii = next(s for s in parallel["stages"] if s["name"] == "pii_filter")
     assert pii["modified"]["phone"] > 0
+
+
+def test_default_config_file_matches_code_defaults():
+    from hamic.data import PipelineConfig
+
+    root = Path(__file__).resolve().parents[1]
+    assert PipelineConfig.from_yaml(root / "configs/pipeline/default.yaml") == PipelineConfig()
+
+
+def test_config_rejects_unknown_keys():
+    from hamic.data import PipelineConfig
+
+    with pytest.raises(TypeError):
+        PipelineConfig.from_mapping({"quality": {"min_char": 100}})
+
+
+def test_config_changes_behaviour_and_is_recorded(tmp_path: Path):
+    from hamic.data import PipelineConfig, QualityFilterConfig
+
+    source_file = tmp_path / "in.jsonl"
+    write_jsonl(source_file, [_doc(0, LONG_TEXT)])
+    registry = SourceRegistry({"s": _record("s", SourceStatus.APPROVED_RESEARCH)})
+    strict = PipelineConfig(name="strict", quality=QualityFilterConfig(min_chars=10_000))
+    result = CorpusPipeline(registry, config=strict).run(
+        [JsonlSource("s", [source_file])], tmp_path / "out", corpus_version="v"
+    )
+    assert sum(result.counts.values()) == 0
+    assert result.manifest["config"]["quality"]["min_chars"] == 10_000
+    assert result.manifest["config_sha256"] == strict.sha256()
+    with pytest.raises(ValueError, match="either"):
+        CorpusPipeline(registry, stages=strict.build_stages(), config=strict)

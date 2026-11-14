@@ -6,22 +6,15 @@ import gzip
 import io
 import json
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, TextIO
 
+from hamic.data.config import PipelineConfig
 from hamic.data.documents import Document, DocumentSource
 from hamic.data.parallel import ParallelPrefix, split_parallel_prefix
 from hamic.data.registry import SourceRegistry, UseCase
-from hamic.data.stages import (
-    ExactDedupStage,
-    NearDedupStage,
-    NormalizeStage,
-    PiiFilterStage,
-    QualityFilterStage,
-    SplitStage,
-    Stage,
-)
+from hamic.data.stages import NearDedupStage, SplitStage, Stage
 from hamic.provenance import code_revision, environment_fingerprint, file_sha256, utc_now
 
 __all__ = ["CorpusPipeline", "PipelineResult", "default_stages"]
@@ -32,14 +25,7 @@ MANIFEST_NAME = "manifest.json"
 
 def default_stages() -> list[Stage]:
     """Return the canonical stage order with default settings."""
-    return [
-        NormalizeStage(),
-        PiiFilterStage(),
-        QualityFilterStage(),
-        ExactDedupStage(),
-        NearDedupStage(),
-        SplitStage(),
-    ]
+    return PipelineConfig().build_stages()
 
 
 @dataclass(frozen=True)
@@ -99,11 +85,13 @@ class CorpusPipeline:
 
     Args:
         registry: Source Registry used to gate every source (fails closed).
-        stages: Ordered stages; the last one must assign ``meta["split"]``.
+        stages: Custom ordered stages (the last must assign ``meta["split"]``). Mutually
+            exclusive with ``config``; the manifest then records no configuration.
         use: Intended use checked against the registry.
-        shard_docs: Maximum documents per output shard.
+        shard_docs: Maximum documents per output shard (overrides ``config``).
         workers: Processes for the stateless stages and MinHash signatures; ``1`` runs
             everything in this process. The output is identical either way.
+        config: Pipeline configuration; defaults to :class:`PipelineConfig` defaults.
     """
 
     def __init__(
@@ -111,15 +99,26 @@ class CorpusPipeline:
         registry: SourceRegistry,
         stages: Sequence[Stage] | None = None,
         use: UseCase = UseCase.RESEARCH,
-        shard_docs: int = 50_000,
+        shard_docs: int | None = None,
         workers: int = 1,
+        config: PipelineConfig | None = None,
     ) -> None:
-        self.registry = registry
-        self.stages = list(stages) if stages is not None else default_stages()
+        if stages is not None and config is not None:
+            raise ValueError("Pass either custom stages or a config, not both")
+        self.config: PipelineConfig | None
+        if stages is not None:
+            self.config = None
+            self.stages = list(stages)
+        else:
+            self.config = config or PipelineConfig()
+            if shard_docs is not None:
+                self.config = replace(self.config, shard_docs=shard_docs)
+            self.stages = self.config.build_stages()
         if not self.stages or not isinstance(self.stages[-1], SplitStage):
             raise ValueError("The last stage must be a SplitStage")
+        self.registry = registry
         self.use = use
-        self.shard_docs = shard_docs
+        self.shard_docs = shard_docs or (self.config.shard_docs if self.config else 50_000)
         self.workers = max(1, workers)
 
     def _stream(self, documents: Iterable[Document]) -> Iterable[Document]:
@@ -164,6 +163,8 @@ class CorpusPipeline:
             "created_at_utc": utc_now(),
             "use": self.use.value,
             "workers": self.workers,
+            "config": self.config.to_dict() if self.config else None,
+            "config_sha256": self.config.sha256() if self.config else None,
             "sources": [
                 {
                     "source_id": r.source_id,
