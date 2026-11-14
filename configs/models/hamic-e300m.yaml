@@ -1,0 +1,10 @@
+# Candidate preset; rope_theta and context are provisional until ablation.
+name: HAMIC-E300M
+architecture: roberta
+label_parameters: 300000000.0
+num_layers: 16
+hidden_size: 1152
+num_heads: 18
+intermediate_size: 4096
+vocab_size: 48000
+max_position_embeddings: 1024

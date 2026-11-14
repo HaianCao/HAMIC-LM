@@ -1,0 +1,13 @@
+# Candidate preset; rope_theta and context are provisional until ablation.
+name: HAMIC-D1B
+architecture: llama
+label_parameters: 1000000000.0
+num_layers: 22
+hidden_size: 2048
+num_heads: 16
+num_kv_heads: 4
+head_dim: 128
+intermediate_size: 5120
+vocab_size: 48000
+max_position_embeddings: 2048
+rope_theta: 500000.0

@@ -1,0 +1,11 @@
+# Candidate preset; rope_theta and context are provisional until ablation.
+name: HAMIC-E100M-M
+architecture: modernbert
+label_parameters: 100000000.0
+num_layers: 18
+hidden_size: 640
+num_heads: 10
+intermediate_size: 1728
+vocab_size: 20544
+max_position_embeddings: 2048
+rope_theta: 160000.0

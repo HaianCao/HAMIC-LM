@@ -1,0 +1,162 @@
+"""Document model and readers for corpus sources."""
+
+from __future__ import annotations
+
+import gzip
+import hashlib
+import json
+from collections.abc import Iterable, Iterator
+from dataclasses import asdict, dataclass, field, replace
+from pathlib import Path
+from typing import Any, Protocol
+
+__all__ = [
+    "Document",
+    "DocumentSource",
+    "HuggingFaceStreamSource",
+    "JsonlSource",
+    "read_jsonl",
+    "write_jsonl",
+]
+
+
+@dataclass(frozen=True)
+class Document:
+    """A single text document with provenance.
+
+    Attributes:
+        doc_id: Stable identifier, unique within the corpus.
+        text: Document text.
+        source_id: Source Registry id of the origin.
+        meta: Provenance and pipeline metadata (URL, title, flags, cluster id...).
+    """
+
+    doc_id: str
+    text: str
+    source_id: str
+    meta: dict[str, Any] = field(default_factory=dict)
+
+    def with_text(self, text: str) -> Document:
+        """Return a copy with ``text`` replaced."""
+        return replace(self, text=text)
+
+    def with_meta(self, **updates: Any) -> Document:
+        """Return a copy with ``meta`` updated."""
+        return replace(self, meta={**self.meta, **updates})
+
+    @property
+    def text_sha256(self) -> str:
+        """SHA-256 of the UTF-8 text."""
+        return hashlib.sha256(self.text.encode("utf-8")).hexdigest()
+
+    def to_json(self) -> str:
+        """Serialize to one JSON line."""
+        return json.dumps(asdict(self), ensure_ascii=False, sort_keys=True)
+
+    @classmethod
+    def from_json(cls, line: str) -> Document:
+        """Parse one JSON line."""
+        data = json.loads(line)
+        return cls(
+            doc_id=str(data["doc_id"]),
+            text=str(data["text"]),
+            source_id=str(data["source_id"]),
+            meta=dict(data.get("meta", {})),
+        )
+
+
+class DocumentSource(Protocol):
+    """Anything that yields documents for a registered source."""
+
+    source_id: str
+
+    def __iter__(self) -> Iterator[Document]: ...
+
+
+def _open_text(path: Path, mode: str) -> Any:
+    if path.suffix == ".gz":
+        return gzip.open(path, mode + "t", encoding="utf-8")
+    return path.open(mode, encoding="utf-8")
+
+
+def read_jsonl(path: str | Path) -> Iterator[Document]:
+    """Yield documents from a ``.jsonl`` or ``.jsonl.gz`` file."""
+    with _open_text(Path(path), "r") as stream:
+        for line in stream:
+            if line.strip():
+                yield Document.from_json(line)
+
+
+def write_jsonl(path: str | Path, documents: Iterable[Document]) -> int:
+    """Write documents as JSON lines and return how many were written."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    count = 0
+    with _open_text(target, "w") as stream:
+        for document in documents:
+            stream.write(document.to_json() + "\n")
+            count += 1
+    return count
+
+
+@dataclass
+class JsonlSource:
+    """Documents stored in local JSON-lines files."""
+
+    source_id: str
+    paths: list[Path]
+
+    def __iter__(self) -> Iterator[Document]:
+        for path in self.paths:
+            yield from read_jsonl(path)
+
+
+@dataclass
+class HuggingFaceStreamSource:
+    """Stream documents from a Hugging Face dataset without downloading it whole.
+
+    Attributes:
+        source_id: Source Registry id.
+        dataset: Dataset repository id, e.g. ``"wikimedia/wikipedia"``.
+        config: Dataset configuration, e.g. ``"20231101.vi"``.
+        revision: Dataset commit to pin; required for reproducibility.
+        split: Dataset split.
+        text_field: Column holding the text.
+        id_field: Column holding a stable id; a content hash is used when absent.
+        meta_fields: Columns copied into ``Document.meta``.
+        limit: Stop after this many documents (``None`` streams everything).
+    """
+
+    source_id: str
+    dataset: str
+    config: str | None
+    revision: str
+    split: str = "train"
+    text_field: str = "text"
+    id_field: str | None = "id"
+    meta_fields: tuple[str, ...] = ("url", "title")
+    limit: int | None = None
+
+    def __iter__(self) -> Iterator[Document]:
+        from datasets import load_dataset
+
+        stream = load_dataset(
+            self.dataset,
+            self.config,
+            split=self.split,
+            revision=self.revision,
+            streaming=True,
+        )
+        for index, row in enumerate(stream):
+            if self.limit is not None and index >= self.limit:
+                break
+            text = row[self.text_field]
+            raw_id = row.get(self.id_field) if self.id_field else None
+            doc_id = (
+                f"{self.source_id}:{raw_id}"
+                if raw_id is not None
+                else (f"{self.source_id}:{hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]}")
+            )
+            meta = {name: row[name] for name in self.meta_fields if name in row}
+            meta["revision"] = self.revision
+            yield Document(doc_id=doc_id, text=text, source_id=self.source_id, meta=meta)

@@ -1,0 +1,62 @@
+# ---------------------------------------------------------------------------
+# Allow-list policy: everything at the repository root is ignored unless it is
+# explicitly re-included below. Internal documents, agent material (.agents/,
+# .claude/), data, checkpoints and run outputs therefore can never be committed
+# by accident.
+# Adding a new top-level path to Git requires a deliberate edit of this file.
+# ---------------------------------------------------------------------------
+/*
+!/.gitignore
+!/.gitattributes
+!/.editorconfig
+!/.github/
+!/README.md
+!/CONTRIBUTING.md
+!/pyproject.toml
+!/src/
+!/tests/
+!/notebooks/
+!/configs/
+
+# Public documentation: only the model-architecture documents. Plans, research notes,
+# data/operations/reporting documents and infrastructure notes stay private.
+!/docs/
+/docs/*
+!/docs/architecture/
+/docs/architecture/*
+!/docs/architecture/model-specifications.md
+!/docs/architecture/naming-and-model-family.md
+!/docs/architecture/component-walkthrough.md
+
+# Never commit these, even inside allowed folders.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+__marimo__/
+.ipynb_checkpoints/
+
+# Data, weights and run artifacts.
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.npy
+*.jsonl
+*.jsonl.gz
+*.parquet
+*.arrow
+*.zst
+
+# Secrets.
+.env
+.env.*
+*.pem
+*.key
+*token*.json
+credentials*.json

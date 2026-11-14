@@ -1,0 +1,20 @@
+# Corpus pilot v0.1: small, stratified-by-source sample for tokenizer ablations.
+sources:
+  - type: huggingface
+    source_id: wikipedia-vi-20231101
+    dataset: wikimedia/wikipedia
+    config: 20231101.vi
+    revision: b04c8d1ceb2f5cd4588862100d08de323dccfbaa
+    text_field: text
+    id_field: id
+    meta_fields: [url, title]
+    limit: 200000
+  - type: huggingface
+    source_id: fineweb2-vie-latn
+    dataset: HuggingFaceFW/fineweb-2
+    config: vie_Latn
+    revision: af9c13333eb981300149d5ca60a8e9d659b276b9
+    text_field: text
+    id_field: id
+    meta_fields: [url, date]
+    limit: 200000

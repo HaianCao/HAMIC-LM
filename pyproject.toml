@@ -1,0 +1,96 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hamic"
+version = "0.1.0.dev0"
+description = "HAMIC: Vietnamese-first language model research toolkit."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "HAMIC" }]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: Vietnamese",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+dependencies = [
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+    "tokenizers>=0.21",
+    "transformers>=4.51",
+    "torch>=2.4",
+    "safetensors>=0.4",
+    "huggingface-hub>=0.30",
+    "datasets>=3.0",
+    "datasketch>=1.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "types-PyYAML",
+]
+molab = ["marimo>=0.10"]
+
+[project.scripts]
+hamic = "hamic.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hamic"]
+
+[tool.ruff]
+line-length = 99
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle (PEP 8)
+    "F",        # pyflakes
+    "I",        # isort
+    "N",        # pep8-naming
+    "UP",       # pyupgrade
+    "B",        # bugbear
+    "SIM",      # simplify
+    "D",        # pydocstyle (PEP 257)
+    "ANN",      # type annotations
+    "PT",       # pytest style
+    "RUF",
+]
+ignore = [
+    "D105",     # magic methods are self-describing
+    "D107",     # __init__ documented on the class
+    "ANN401",   # Any is allowed at JSON boundaries
+    "RUF001",   # Vietnamese text legitimately contains ambiguous-looking glyphs
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "ANN"]
+"notebooks/**" = ["D", "ANN", "B018", "N803", "N806"]  # marimo cells pass constants
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_unreachable = true
+mypy_path = "src"
+packages = ["hamic"]
+
+[[tool.mypy.overrides]]
+module = ["datasketch.*", "datasets.*", "pyvi.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = ["slow: tests that build real-size model graphs"]

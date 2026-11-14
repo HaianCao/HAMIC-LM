@@ -1,0 +1,13 @@
+# Candidate preset; rope_theta and context are provisional until ablation.
+name: HAMIC-D500M
+architecture: llama
+label_parameters: 500000000.0
+num_layers: 24
+hidden_size: 1280
+num_heads: 10
+num_kv_heads: 2
+head_dim: 128
+intermediate_size: 3584
+vocab_size: 48000
+max_position_embeddings: 2048
+rope_theta: 500000.0

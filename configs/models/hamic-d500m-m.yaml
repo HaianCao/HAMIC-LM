@@ -1,0 +1,14 @@
+# Candidate preset; rope_theta and context are provisional until ablation.
+name: HAMIC-D500M-M
+architecture: qwen3
+label_parameters: 500000000.0
+num_layers: 28
+hidden_size: 1280
+num_heads: 10
+num_kv_heads: 2
+head_dim: 128
+intermediate_size: 3584
+vocab_size: 20544
+max_position_embeddings: 2048
+rope_theta: 500000.0
+norm_eps: 1.0e-06
