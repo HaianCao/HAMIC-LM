@@ -75,43 +75,61 @@ def matmul_tflops(
 
 
 def storage_throughput(
-    store: ObjectStore, size_mib: int = 256, prefix: str = "bench"
+    store: ObjectStore, size_mib: int = 256, files: int = 1, prefix: str = "bench"
 ) -> dict[str, Any]:
-    """Upload then download one incompressible file and verify it round-trips.
+    """Upload then download incompressible data and verify it round-trips.
 
-    The file is left at ``<prefix>/<uuid>.bin`` so the measurement is auditable; delete
-    the prefix when it is no longer needed.
+    With ``files > 1`` the data is split into equal files uploaded in one commit and
+    downloaded with :meth:`ObjectStore.download_prefix`, which is how sharded checkpoints
+    are restored; compare it with ``files=1`` to see whether parallel transfer helps.
+    Objects are left under ``<prefix>/<uuid>/`` so the measurement is auditable.
 
     Args:
         store: Object store to measure.
-        size_mib: File size in MiB. Use at least a few hundred MiB: small files are
+        size_mib: Total size in MiB. Use at least a few hundred MiB: small transfers are
             dominated by per-request overhead and understate bulk throughput.
+        files: Number of files the data is split into.
         prefix: Remote folder for benchmark objects.
     """
-    remote = f"{prefix}/{uuid.uuid4().hex}.bin"
+    if files < 1 or size_mib < files:
+        raise ValueError("Require 1 <= files <= size_mib")
+    remote_dir = f"{prefix}/{uuid.uuid4().hex}"
+    per_file = size_mib // files
     with tempfile.TemporaryDirectory(prefix="hamic-bench-") as tmp:
-        source = Path(tmp) / "upload.bin"
-        with source.open("wb") as stream:
-            for _ in range(size_mib):
-                stream.write(os.urandom(2**20))
-        expected = file_sha256(source)
+        upload_dir = Path(tmp) / "upload"
+        upload_dir.mkdir()
+        expected: dict[str, str] = {}
+        for index in range(files):
+            source = upload_dir / f"part-{index:03d}.bin"
+            with source.open("wb") as stream:
+                for _ in range(per_file):
+                    stream.write(os.urandom(2**20))
+            expected[source.name] = file_sha256(source)
+        mapping = {f"{remote_dir}/{name}": upload_dir / name for name in expected}
 
         started = time.perf_counter()
-        store.put_files({remote: source}, message=f"storage benchmark {size_mib} MiB")
+        store.put_files(mapping, message=f"storage benchmark {files}x{per_file} MiB")
         upload_seconds = time.perf_counter() - started
 
-        target = Path(tmp) / "download.bin"
+        target = Path(tmp) / "download"
         started = time.perf_counter()
-        store.download(remote, target)
+        if files == 1:
+            name = next(iter(expected))
+            target.mkdir()
+            store.download(f"{remote_dir}/{name}", target / name)
+        else:
+            store.download_prefix(remote_dir, target)
         download_seconds = time.perf_counter() - started
-        intact = file_sha256(target) == expected
+        intact = all(file_sha256(target / name) == sha for name, sha in expected.items())
 
+    total = per_file * files
     return {
-        "remote_path": remote,
-        "size_mib": size_mib,
+        "remote_path": remote_dir,
+        "files": files,
+        "size_mib": total,
         "upload_seconds": round(upload_seconds, 2),
         "download_seconds": round(download_seconds, 2),
-        "upload_mib_s": round(size_mib / upload_seconds, 2),
-        "download_mib_s": round(size_mib / download_seconds, 2),
+        "upload_mib_s": round(total / upload_seconds, 2),
+        "download_mib_s": round(total / download_seconds, 2),
         "intact": intact,
     }

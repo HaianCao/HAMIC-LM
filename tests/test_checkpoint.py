@@ -63,8 +63,9 @@ def test_committed_checkpoint_is_immutable(tmp_path: Path):
         publisher.publish(_payload(tmp_path / "b", b"y"), {"global_step": 3})
 
 
-def test_strict_resume_reproduces_uninterrupted_run(tmp_path: Path):
-    config = SmokeConfig(steps=8, checkpoint_every=3)
+@pytest.mark.parametrize("max_shard_mib", [1024.0, 0.05], ids=["one-shard", "many-shards"])
+def test_strict_resume_reproduces_uninterrupted_run(tmp_path: Path, max_shard_mib: float):
+    config = SmokeConfig(steps=8, checkpoint_every=3, max_shard_mib=max_shard_mib)
     reference = run_smoke(LocalObjectStore(tmp_path / "a"), tmp_path / "wa", config)
 
     store = LocalObjectStore(tmp_path / "b")
@@ -121,3 +122,66 @@ def test_hub_downloads_land_directly_without_extra_copy(tmp_path: Path, monkeypa
 
     leftovers = [p.name for p in tmp_path.rglob(".*")]
     assert leftovers == []  # staging directories are removed
+
+
+def test_sharded_state_roundtrip_and_tied_weights(tmp_path: Path):
+    import json
+
+    import torch
+
+    from hamic.modeling import Architecture, build_model
+    from hamic.training import DataCursor, load_training_state, save_training_state
+    from tests.conftest import tiny_preset
+
+    preset = tiny_preset(Architecture.QWEN3, vocab_size=300)
+    model = build_model(preset, seed=0)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    ids = torch.randint(5, 300, (2, 8))
+    model(input_ids=ids, labels=ids).loss.backward()
+    optimizer.step()
+    root = save_training_state(
+        tmp_path / "ckpt", model, optimizer, None, DataCursor(offset=7), max_shard_mib=0.02
+    )
+    index = json.loads((root / "checkpoint_index.json").read_text(encoding="utf-8"))
+    assert len(index["weights"]["files"]) > 1
+    assert len(index["optimizer"]["files"]) > 1
+    assert index["weights"]["aliases"] == {"lm_head.weight": "model.embed_tokens.weight"}
+
+    fresh = build_model(preset, seed=1)
+    fresh_opt = torch.optim.AdamW(fresh.parameters(), lr=1e-3)
+    cursor = load_training_state(root, fresh, fresh_opt, None)
+    assert cursor.offset == 7
+    for (name, a), b in zip(model.state_dict().items(), fresh.state_dict().values(), strict=True):
+        assert torch.equal(a, b), name
+    assert fresh.get_input_embeddings().weight is fresh.get_output_embeddings().weight
+    saved, loaded = optimizer.state_dict()["state"], fresh_opt.state_dict()["state"]
+    assert all(torch.equal(saved[k]["exp_avg"], loaded[k]["exp_avg"]) for k in saved)
+
+
+def test_legacy_single_file_checkpoint_still_loads(tmp_path: Path):
+    import json
+
+    import torch
+    from safetensors.torch import save_model
+
+    from hamic.modeling import Architecture, build_model
+    from hamic.training import capture_rng, load_training_state
+    from tests.conftest import tiny_preset
+
+    preset = tiny_preset(Architecture.LLAMA, vocab_size=300)
+    model = build_model(preset, seed=0)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    root = tmp_path / "legacy"
+    root.mkdir()
+    save_model(model, str(root / "model.safetensors"))
+    torch.save(
+        {"optimizer": optimizer.state_dict(), "scheduler": None, "rng": capture_rng()},
+        root / "trainer_state.pt",
+    )
+    (root / "data_cursor.json").write_text(json.dumps({"offset": 3}), encoding="utf-8")
+    fresh = build_model(preset, seed=1)
+    cursor = load_training_state(root, fresh, torch.optim.AdamW(fresh.parameters()), None)
+    assert cursor.offset == 3
+    assert all(
+        torch.equal(a, b) for a, b in zip(model.parameters(), fresh.parameters(), strict=True)
+    )

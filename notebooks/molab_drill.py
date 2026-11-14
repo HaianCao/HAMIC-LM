@@ -40,17 +40,22 @@ def _():
     # SHA for long runs so every session of the run uses the same code.
     HAMIC_SOURCE = "git+https://github.com/HaianCao/HAMIC-LM@main"
     HUB_REPO = "HaianCao/hamic-runs"
-    RUN_ID = "drill-002"  # use a new id per drill; a finished run cannot be resumed
-    return HAMIC_SOURCE, HUB_REPO, RUN_ID
+    RUN_ID = "drill-003"  # use a new id per drill; a finished run cannot be resumed
+    # Faster parallel Hub transfers. Read when huggingface_hub is first imported, so
+    # changing it requires a kernel restart.
+    XET_HIGH_PERFORMANCE = True
+    return HAMIC_SOURCE, HUB_REPO, RUN_ID, XET_HIGH_PERFORMANCE
 
 
 @app.cell
-def _(HAMIC_SOURCE, mo):
+def _(HAMIC_SOURCE, XET_HIGH_PERFORMANCE, mo):
     import json
+    import os as _os
     import subprocess
     import sys
     from importlib import metadata
 
+    _os.environ["HF_XET_HIGH_PERFORMANCE"] = "1" if XET_HIGH_PERFORMANCE else "0"
     requested_ref = HAMIC_SOURCE.rsplit("@", 1)[-1]
     pip = [sys.executable, "-m", "pip", "install", "-q"]
     subprocess.run([*pip, HAMIC_SOURCE], check=True)  # dependencies
@@ -133,15 +138,19 @@ def _(HUB_REPO, hamic_ready, mo, token_input):
     mo.stop(not hub_token, mo.md("**Enter a Hugging Face token above** to continue."))
     if "<" in HUB_REPO:
         raise ValueError("Set HUB_REPO to your private Hugging Face repository first")
+    from huggingface_hub import constants as _hf_constants
+
     store = HuggingFaceObjectStore(HUB_REPO, private=True, token=hub_token)
     account = store.whoami()
+    xet_mode = "high-performance" if _hf_constants.HF_XET_HIGH_PERFORMANCE else "default"
     phase = mo.ui.radio(
         options=["train", "resume"], value="train", label="Drill phase (session 1 / session 2)"
     )
     mo.vstack(
         [
             mo.md(
-                f"Hub account **{account}** · run store `{HUB_REPO}` · code `{hamic_ready[:12]}`"
+                f"Hub account **{account}** · run store `{HUB_REPO}` · "
+                f"code `{hamic_ready[:12]}` · Xet transfers: **{xet_mode}**"
             ),
             phase,
         ]
@@ -154,27 +163,34 @@ def _(mo):
     bench_size = mo.ui.dropdown(
         options={"256 MiB": 256, "1 GiB": 1024, "2 GiB": 2048},
         value="1 GiB",
-        label="Test file size",
+        label="Total size",
+    )
+    bench_files = mo.ui.dropdown(
+        options={"1 file": 1, "4 files": 4, "8 files": 8, "16 files": 16},
+        value="8 files",
+        label="Split into",
     )
     bench_button = mo.ui.run_button(label="Measure Hub upload/download throughput")
     mo.vstack(
         [
             mo.md(
-                "Checkpoint upload speed decides how often a long run can checkpoint. "
-                "The test file stays under `bench/` in the run repository."
+                "Upload speed decides how often a run can checkpoint; download speed decides "
+                "how long a resume takes. Compare **1 file** with **8 files**: sharded "
+                "checkpoints are restored with parallel downloads. Test files stay under "
+                "`bench/` in the run repository."
             ),
-            mo.hstack([bench_size, bench_button], justify="start"),
+            mo.hstack([bench_size, bench_files, bench_button], justify="start"),
         ]
     )
-    return bench_button, bench_size
+    return bench_button, bench_files, bench_size
 
 
 @app.cell
-def _(bench_button, bench_size, mo, store):
+def _(bench_button, bench_files, bench_size, mo, store):
     from hamic.runtime import storage_throughput
 
     mo.stop(not bench_button.value)
-    throughput = storage_throughput(store, size_mib=bench_size.value)
+    throughput = storage_throughput(store, size_mib=bench_size.value, files=bench_files.value)
     mo.json(throughput)
     return
 

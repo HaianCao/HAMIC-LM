@@ -47,4 +47,12 @@ def test_storage_throughput_roundtrip(tmp_path: Path):
     result = storage_throughput(store, size_mib=2)
     assert result["intact"] is True
     assert result["upload_mib_s"] > 0
-    assert store.read_bytes(result["remote_path"]) is not None
+    assert store.list_files(result["remote_path"])
+
+
+def test_storage_throughput_parallel_files(tmp_path: Path):
+    store = LocalObjectStore(tmp_path / "store")
+    result = storage_throughput(store, size_mib=4, files=4)
+    assert result["intact"] is True
+    assert result["files"] == 4
+    assert len(store.list_files(result["remote_path"])) == 4

@@ -54,6 +54,7 @@ class SmokeConfig:
     run_id: str = "smoke"
     steps: int = 12
     checkpoint_every: int = 4
+    max_shard_mib: float = 1024.0
     batch_size: int = 4
     seq_len: int = 32
     learning_rate: float = 1e-3
@@ -158,7 +159,9 @@ def run_smoke(
             local = work / f"step-{global_step:09d}"
             if local.exists():
                 shutil.rmtree(local)
-            save_training_state(local, model, optimizer, scheduler, cursor)
+            save_training_state(
+                local, model, optimizer, scheduler, cursor, max_shard_mib=cfg.max_shard_mib
+            )
             publisher.publish(local, _metadata(cfg, global_step, restored))
             published.append(global_step)
         if stop_after_step is not None and global_step >= stop_after_step:
