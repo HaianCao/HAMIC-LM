@@ -1,0 +1,12 @@
+# Proxy preset (experiment config, not a release name). Encoder reference profile
+# (RoBERTa: absolute positions, GELU, post-LN) at ~50M with the t1 vocabulary.
+name: HAMIC-E-proxy-ref-t1
+architecture: roberta
+label_parameters: 5.0e7
+label_tolerance: 0.1
+num_layers: 12
+hidden_size: 512
+num_heads: 8
+intermediate_size: 2048
+vocab_size: 20544
+max_position_embeddings: 1024

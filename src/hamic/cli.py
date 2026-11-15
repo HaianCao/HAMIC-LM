@@ -99,6 +99,30 @@ def _cmd_corpus_tokenize(args: argparse.Namespace) -> int:
     return 0
 
 
+def _default_prefix(directory: str) -> str:
+    path = Path(directory).resolve()
+    return f"tokenized/{path.parent.name}/{path.name}"
+
+
+def _cmd_corpus_push(args: argparse.Namespace) -> int:
+    from hamic.data import publish_tokenized
+
+    prefix = args.prefix or _default_prefix(args.tokenized)
+    count = publish_tokenized(args.tokenized, _store(args.store), prefix)
+    _print_json({"prefix": prefix, "files": count})
+    return 0
+
+
+def _cmd_corpus_pull(args: argparse.Namespace) -> int:
+    from hamic.data import fetch_tokenized
+
+    prefix = args.prefix or _default_prefix(args.out)
+    corpus = fetch_tokenized(_store(args.store), prefix, args.out)
+    splits = corpus.manifest["splits"]
+    _print_json({"prefix": prefix, "tokens": {k: v["tokens"] for k, v in splits.items()}})
+    return 0
+
+
 def _cmd_tokenizer_train(args: argparse.Namespace) -> int:
     from hamic.tokenization import TokenizerKind, TokenizerSpec, export_tokenizer, train_tokenizer
 
@@ -157,9 +181,12 @@ def _store(spec: str) -> Any:
     kind, _, location = spec.partition(":")
     if kind == "local" and location:
         return LocalObjectStore(location)
-    if kind == "hf" and location:
-        return HuggingFaceObjectStore(location, private=True)
-    raise SystemExit("--store must be local:<dir> or hf:<namespace/repo>")
+    if kind in {"hf", "hf-dataset"} and location:
+        repo_type = "dataset" if kind == "hf-dataset" else "model"
+        return HuggingFaceObjectStore(location, repo_type=repo_type, private=True)
+    raise SystemExit(
+        "--store must be local:<dir>, hf:<namespace/repo> or hf-dataset:<namespace/repo>"
+    )
 
 
 def _cmd_drill(args: argparse.Namespace) -> int:
@@ -238,6 +265,20 @@ def _parser() -> argparse.ArgumentParser:
     tokenize.add_argument("--out", required=True)
     tokenize.add_argument("--shard-tokens", type=int, default=50_000_000)
     tokenize.set_defaults(func=_cmd_corpus_tokenize)
+
+    store_help = "local:<dir>, hf:<namespace/repo> or hf-dataset:<namespace/repo>"
+    prefix_help = "remote prefix (default: tokenized/<parent dir>/<dir>)"
+    push = corpus.add_parser("push", help="upload tokenized shards to a store")
+    push.add_argument("--tokenized", required=True, help="tokenized directory")
+    push.add_argument("--store", required=True, help=store_help)
+    push.add_argument("--prefix", help=prefix_help)
+    push.set_defaults(func=_cmd_corpus_push)
+
+    pull = corpus.add_parser("pull", help="download and verify tokenized shards")
+    pull.add_argument("--store", required=True, help=store_help)
+    pull.add_argument("--out", required=True, help="local tokenized directory")
+    pull.add_argument("--prefix", help=prefix_help)
+    pull.set_defaults(func=_cmd_corpus_pull)
 
     tok = sub.add_parser("tokenizer", help="tokenizer training and evaluation").add_subparsers(
         dest="tokenizer_command", required=True

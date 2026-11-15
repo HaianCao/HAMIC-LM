@@ -76,6 +76,10 @@ def test_tokenized_shards_roundtrip(tmp_path, frozen_corpus, exported_tokenizers
     for ids, text in zip(stored, texts, strict=True):
         assert ids.tolist() == tokenizer.encode(text, add_special_tokens=False).ids
     assert sum(len(d) for d in stored) == train["tokens"]
+    lengths = corpus.token_byte_lengths()
+    for ids, text in zip(stored, texts, strict=True):
+        assert int(lengths[ids].sum()) == len(text.encode("utf-8"))
+    assert lengths[:5].sum() == 0  # special tokens decode to no bytes
 
 
 def test_tokenized_corpus_detects_tampering(tmp_path, frozen_corpus, exported_tokenizers):
@@ -85,6 +89,9 @@ def test_tokenized_corpus_detects_tampering(tmp_path, frozen_corpus, exported_to
     np.save(out / "train" / shard, np.zeros(3, dtype=np.uint16))
     with pytest.raises(ValueError, match="Checksum"):
         TokenizedCorpus(out, verify=True)
+    (out / "tokenizer.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="does not match"):
+        TokenizedCorpus(out).token_byte_lengths()
     with pytest.raises(FileExistsError):
         tokenize_corpus(frozen_corpus, exported_tokenizers[TokenizerKind.ENCODER], out)
 
@@ -94,3 +101,30 @@ def test_large_vocab_uses_uint32():
 
     assert _dtype_for(65536) == np.uint16
     assert _dtype_for(65537) == np.uint32
+
+
+def test_publish_and_fetch_roundtrip(tmp_path, frozen_corpus, exported_tokenizers):
+    from hamic.checkpoint import LocalObjectStore
+    from hamic.data import fetch_tokenized, publish_tokenized
+
+    out = tmp_path / "tokens"
+    tokenize_corpus(frozen_corpus, exported_tokenizers[TokenizerKind.ENCODER], out)
+    store = LocalObjectStore(tmp_path / "store")
+    with pytest.raises(FileNotFoundError):
+        fetch_tokenized(store, "tokenized/x", tmp_path / "missing")
+    count = publish_tokenized(out, store, "tokenized/t/tok")
+    assert "tokenized/t/tok/tokenizer.json" in store.list_files("tokenized/t/tok")
+    assert count == len(store.list_files("tokenized/t/tok"))
+
+    local = tmp_path / "fetched"
+    fetched = fetch_tokenized(store, "tokenized/t/tok", local)
+    assert (
+        next(fetched.documents("train")).tolist()
+        == next(TokenizedCorpus(out).documents("train")).tolist()
+    )
+    assert fetched.token_byte_lengths().sum() > 0
+    # A corrupt local copy is replaced on the next fetch.
+    shard = next((local / "train").glob("*.tokens.npy"))
+    np.save(shard, np.zeros(3, dtype=np.uint16))
+    fetch_tokenized(store, "tokenized/t/tok", local)
+    TokenizedCorpus(local, verify=True)

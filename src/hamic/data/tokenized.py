@@ -8,28 +8,40 @@ Each shard is a pair of ``.npy`` files:
   document ``i`` is ``tokens[offsets[i]:offsets[i + 1]]``.
 
 Ids carry **no special tokens**: adding ``<s>``/``</s>``, packing and masking belong to the
-training data loader. ``tokenized_manifest.json`` (written last) records the tokenizer and
-source-corpus hashes and a checksum for every file.
+training data loader. A copy of ``tokenizer.json`` travels with the shards, so a tokenized
+directory is self-contained (e.g. for decoding or bits-per-byte). ``tokenized_manifest.json``
+(written last) records the tokenizer and source-corpus hashes and a checksum for every file.
 """
 
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from hamic.data.documents import read_jsonl
 from hamic.provenance import code_revision, file_sha256, utc_now
 
-__all__ = ["TokenizedCorpus", "TokenizedShard", "tokenize_corpus"]
+if TYPE_CHECKING:
+    from hamic.checkpoint.storage import ObjectStore
+
+__all__ = [
+    "TokenizedCorpus",
+    "TokenizedShard",
+    "fetch_tokenized",
+    "publish_tokenized",
+    "tokenize_corpus",
+]
 
 MANIFEST_NAME = "tokenized_manifest.json"
 SOURCE_MANIFEST = "manifest.json"
 SPLITS = ("train", "validation", "test")
+TOKENIZER_NAME = "tokenizer.json"
 
 
 def _dtype_for(vocab_size: int) -> np.dtype[Any]:
@@ -174,6 +186,7 @@ def tokenize_corpus(
         "code": code_revision(),
     }
     out.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(tokenizer_file, out / TOKENIZER_NAME)
     (out / MANIFEST_NAME).write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
     )
@@ -225,6 +238,32 @@ class TokenizedCorpus:
                     if file_sha256(path) != entry["sha256"]:
                         raise ValueError(f"Checksum mismatch: {path}")
 
+    def token_byte_lengths(self) -> np.ndarray[Any, Any]:
+        """UTF-8 bytes each token id decodes to (``0`` for special and added tokens).
+
+        Used to report bits per byte, which, unlike loss per token, is comparable across
+        tokenizers. Reads the ``tokenizer.json`` copy stored with the shards and checks it
+        against the manifest hash.
+
+        Raises:
+            FileNotFoundError: The directory has no tokenizer copy.
+            ValueError: The copy does not match the manifest, or is not byte-level BPE.
+        """
+        path = self.directory / TOKENIZER_NAME
+        if not path.is_file():
+            raise FileNotFoundError(f"{self.directory} has no {TOKENIZER_NAME}")
+        if file_sha256(path) != self.manifest["tokenizer"]["sha256"]:
+            raise ValueError(f"{path} does not match the tokenizer recorded in the manifest")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("decoder", {}).get("type") != "ByteLevel":
+            raise ValueError("Byte lengths need a byte-level tokenizer")
+        lengths = np.zeros(self.vocab_size, dtype=np.int64)
+        for token, index in data["model"]["vocab"].items():
+            lengths[index] = len(token)  # one alphabet character per byte
+        for added in data.get("added_tokens", []):
+            lengths[added["id"]] = 0
+        return lengths
+
     def shards(self, split: str) -> Iterator[TokenizedShard]:
         """Yield memory-mapped shards of ``split`` in order."""
         for shard in self.manifest["splits"][split]["shards"]:
@@ -239,3 +278,48 @@ class TokenizedCorpus:
         for shard in self.shards(split):
             for index in range(len(shard)):
                 yield shard.document(index)
+
+
+def publish_tokenized(directory: str | Path, store: ObjectStore, prefix: str) -> int:
+    """Upload a tokenized directory to ``store`` under ``prefix``.
+
+    Shards and the tokenizer copy go in one commit; the manifest follows in a second one,
+    so a reader that finds the manifest also finds every file it lists.
+
+    Returns:
+        Number of files uploaded.
+    """
+    corpus = TokenizedCorpus(directory, verify=True)
+    root = corpus.directory
+    payload = {
+        f"{prefix}/{path.relative_to(root).as_posix()}": path
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and path.name != MANIFEST_NAME
+    }
+    store.put_files(payload, message=f"tokenized shards {prefix}")
+    store.put_files(
+        {f"{prefix}/{MANIFEST_NAME}": root / MANIFEST_NAME},
+        message=f"tokenized manifest {prefix}",
+    )
+    return len(payload) + 1
+
+
+def fetch_tokenized(store: ObjectStore, prefix: str, destination: str | Path) -> TokenizedCorpus:
+    """Download shards published by :func:`publish_tokenized` and verify every checksum.
+
+    An existing ``destination`` is reused when it verifies; a partial or corrupt copy is
+    replaced.
+    """
+    target = Path(destination)
+    if (target / MANIFEST_NAME).is_file():
+        try:
+            return TokenizedCorpus(target, verify=True)
+        except (ValueError, FileNotFoundError):
+            pass
+    if target.exists():
+        shutil.rmtree(target)
+    if store.read_bytes(f"{prefix}/{MANIFEST_NAME}") is None:
+        raise FileNotFoundError(f"No tokenized manifest under {prefix!r}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    store.download_prefix(prefix, target)
+    return TokenizedCorpus(target, verify=True)

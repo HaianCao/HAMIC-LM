@@ -1,0 +1,24 @@
+# D-proxy, reference (Llama), t1. Baseline arm of the tokenizer (vs ref-t2) and QK-Norm
+# (vs m-t1) comparisons. Compare arms on eval_bpb.
+version: 1
+run_id: d-proxy-ref-t1
+model_preset: configs/models/proxy/d-proxy-ref-t1.yaml
+tokenized: data/tokenized/pilot-v0.1/t1-bbpe-20544
+objective: clm
+seq_len: 1024
+micro_batch_size: 64
+grad_accum_steps: 8          # 524,288 tokens per optimizer step
+total_tokens: 1.0e9
+learning_rate: 1.5e-3        # shared by every D-proxy run; not tuned per arm
+warmup_ratio: 0.02
+min_lr_ratio: 0.1
+betas: [0.9, 0.95]
+weight_decay: 0.1
+grad_clip: 1.0
+precision: bf16
+seed: 1234
+device: auto
+log_every_steps: 10
+eval_every_steps: 250
+eval_sequences: 1024         # ~1M validation tokens, fixed across evaluations
+checkpoint_every_minutes: 30

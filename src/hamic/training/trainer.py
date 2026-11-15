@@ -49,6 +49,9 @@ class TrainResult:
         resumed_from_step: Step restored at the start (``None`` for a fresh run).
         losses: Training loss per optimizer step of this session.
         evaluations: Validation loss per evaluated step.
+        eval_bits_per_byte: Validation bits per UTF-8 byte per evaluated step (causal LM
+            with a byte-level tokenizer copy next to the shards); comparable across
+            tokenizers, unlike loss per token.
         published_steps: Checkpoints committed in this session.
         warnings: Non-fatal resume warnings.
     """
@@ -58,6 +61,7 @@ class TrainResult:
     resumed_from_step: int | None
     losses: dict[int, float] = field(default_factory=dict)
     evaluations: dict[int, float] = field(default_factory=dict)
+    eval_bits_per_byte: dict[int, float] = field(default_factory=dict)
     published_steps: list[int] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -118,16 +122,22 @@ class Pretrainer:
             ("cuda" if torch.cuda.is_available() else "cpu") if wanted == "auto" else wanted
         )
         self._pending_metrics: list[dict[str, Any]] = []
+        self._byte_lengths: torch.Tensor | None = None
+        if config.objective == "clm":
+            try:
+                self._byte_lengths = torch.from_numpy(self.corpus.token_byte_lengths())
+            except FileNotFoundError:
+                self._byte_lengths = None
 
     # -- construction ------------------------------------------------------------------
 
-    def _objective(self) -> Objective:
+    def _objective(self, mask_rate: float | None = None) -> Objective:
         tokens = self.preset.special_tokens
         ordered = tokens.ordered
         if self.config.objective == "clm":
             return CausalLM()
         return MaskedLM(
-            mask_rate=self.config.mask_rate,
+            mask_rate=mask_rate or self.config.mask_rate,
             mask_id=ordered.index(tokens.mask),
             vocab_size=self.preset.vocab_size,
             special_ids=range(len(ordered)),
@@ -191,6 +201,7 @@ class Pretrainer:
         optimizer = self._optimizer(model)
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, _cosine_schedule(cfg))
         objective = self._objective()
+        eval_objective = self._objective(cfg.eval_mask_rate)
 
         restore_dir = self.workdir / "restore"
         shutil.rmtree(restore_dir, ignore_errors=True)
@@ -262,9 +273,8 @@ class Pretrainer:
             if self.device.type == "cuda":
                 record["max_memory_gib"] = round(torch.cuda.max_memory_allocated() / 2**30, 2)
             if cfg.eval_every_steps and step % cfg.eval_every_steps == 0:
-                record["eval_loss"] = result.evaluations[step] = self._evaluate(
-                    model, objective, eval_batches, autocast
-                )
+                record.update(self._evaluate(model, eval_objective, eval_batches, autocast))
+                self._store_eval(result, step, record)
             self._pending_metrics.append(record)
             if step % cfg.log_every_steps == 0 or step == cfg.total_steps:
                 self.log(record)
@@ -280,10 +290,10 @@ class Pretrainer:
             pause = self.clock.should_stop()
             if (finished or due or pause) and step != last_checkpoint_step:
                 if finished and step not in result.evaluations:
-                    result.evaluations[step] = self._evaluate(
-                        model, objective, eval_batches, autocast
-                    )
-                    self._pending_metrics[-1]["eval_loss"] = result.evaluations[step]
+                    final = self._evaluate(model, eval_objective, eval_batches, autocast)
+                    record.update(final)
+                    self._store_eval(result, step, record)
+                    self.log({"step": step, **final})
                 self._checkpoint(model, optimizer, scheduler, data, step, restored, publisher)
                 result.published_steps.append(step)
                 last_checkpoint_step, last_checkpoint_time = step, time.monotonic()
@@ -317,6 +327,12 @@ class Pretrainer:
         count = max(1, math.ceil(cfg.eval_sequences / cfg.micro_batch_size))
         return [loader.next_batch() for _ in range(count)]
 
+    @staticmethod
+    def _store_eval(result: TrainResult, step: int, record: dict[str, Any]) -> None:
+        result.evaluations[step] = record["eval_loss"]
+        if "eval_bpb" in record:
+            result.eval_bits_per_byte[step] = record["eval_bpb"]
+
     @torch.no_grad()
     def _evaluate(
         self,
@@ -324,16 +340,27 @@ class Pretrainer:
         objective: Objective,
         batches: list[torch.Tensor],
         autocast: bool,
-    ) -> float:
+    ) -> dict[str, float]:
         model.eval()
         total = 0.0
+        nats = 0.0
+        target_bytes = 0
         for index, batch in enumerate(batches):
             inputs = objective(batch, _EVAL_SEED_OFFSET + index)
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
             with torch.autocast(self.device.type, torch.bfloat16, enabled=autocast):
-                total += float(model(**inputs).loss)
+                loss = float(model(**inputs).loss)
+            total += loss
+            if self._byte_lengths is not None:
+                # Causal LM: the mean runs over every position but the first of each row.
+                targets = batch[:, 1:]
+                nats += loss * targets.numel()
+                target_bytes += int(self._byte_lengths[targets].sum())
         model.train()
-        return round(total / len(batches), 6)
+        metrics = {"eval_loss": round(total / len(batches), 6)}
+        if target_bytes:
+            metrics["eval_bpb"] = round(nats / (math.log(2) * target_bytes), 6)
+        return metrics
 
     def _checkpoint(
         self,

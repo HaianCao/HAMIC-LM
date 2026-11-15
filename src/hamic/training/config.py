@@ -64,6 +64,8 @@ class PretrainConfig:
         log_every_steps: Metric logging cadence.
         eval_every_steps: Validation cadence (0 disables periodic evaluation).
         eval_sequences: Validation sequences per evaluation.
+        eval_mask_rate: MLM rate used for validation (``None``: :attr:`mask_rate`). A fixed
+            value keeps validation loss comparable between runs with different mask rates.
         checkpoint_every_steps: Checkpoint cadence in optimizer steps (0 disables).
         checkpoint_every_minutes: Checkpoint cadence in wall-clock minutes (0 disables).
         max_shard_mib: Checkpoint shard size.
@@ -95,6 +97,7 @@ class PretrainConfig:
     log_every_steps: int = 10
     eval_every_steps: int = 500
     eval_sequences: int = 256
+    eval_mask_rate: float | None = None
     checkpoint_every_steps: int = 0
     checkpoint_every_minutes: float = 45.0
     max_shard_mib: float = 1024.0

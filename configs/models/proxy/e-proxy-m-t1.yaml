@@ -1,0 +1,13 @@
+# Proxy preset (experiment config, not a release name). Encoder modern profile
+# (ModernBERT: RoPE, GeGLU, pre-LN); GeGLU width 1344 matches the reference FFN parameters.
+name: HAMIC-E-proxy-m-t1
+architecture: modernbert
+label_parameters: 5.0e7
+label_tolerance: 0.1
+num_layers: 12
+hidden_size: 512
+num_heads: 8
+intermediate_size: 1344
+vocab_size: 20544
+max_position_embeddings: 1024
+rope_theta: 160000.0

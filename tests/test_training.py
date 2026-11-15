@@ -186,6 +186,11 @@ def test_training_completes_and_marks_run(tmp_path, tokenized, architecture):
     assert result.final_step == 8
     assert result.published_steps == [8]
     assert set(result.evaluations) == {4, 8}
+    if architecture == "qwen3":
+        assert set(result.eval_bits_per_byte) == {4, 8}
+        assert 0 < result.eval_bits_per_byte[8] < result.evaluations[8] / 0.6931
+    else:
+        assert result.eval_bits_per_byte == {}
     assert store.read_bytes("runs/test-run/COMPLETE.json") is not None
     metrics = store.read_bytes("runs/test-run/checkpoints/step-000000008/metrics.jsonl")
     assert metrics is not None
@@ -227,3 +232,21 @@ def test_soft_deadline_pauses_with_checkpoint(tmp_path, tokenized):
     finished = Pretrainer(config, store, tmp_path / "w2", log=lambda r: None).run()
     assert finished.resumed_from_step == 2
     assert finished.status == "completed"
+
+
+# -- shipped configurations ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path", sorted(Path("configs/train").rglob("*.yaml")), ids=lambda p: p.stem
+)
+def test_shipped_train_configs_are_valid(path):
+    from hamic.modeling import ModelPreset, parameter_report
+
+    config = PretrainConfig.from_yaml(path)
+    preset = ModelPreset.from_yaml(config.model_preset)
+    assert parameter_report(preset).within_label
+    assert config.objective == ("mlm" if preset.family.value == "encoder" else "clm")
+    assert config.seq_len <= preset.max_position_embeddings
+    vocab_of = {"t1-bbpe-20544": 20544, "t2-bbpe-32k": 32000}
+    assert preset.vocab_size == vocab_of[Path(config.tokenized).name]
