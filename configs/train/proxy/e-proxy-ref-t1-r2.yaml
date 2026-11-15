@@ -1,5 +1,6 @@
 # E-proxy, reference (RoBERTa), t1, MLM 15%. Architecture arm vs e-proxy-m-t1.
-# Rerun of e-proxy-ref-t1, which stayed at the unigram loss (~7.4) under transformers 5.14.
+# Rerun of e-proxy-ref-t1 under transformers>=5.23; it collapsed to the unigram loss the
+# same way, so the cause is the lr schedule, not 5.14 (see e-proxy-ref-t1-r3).
 version: 1
 run_id: e-proxy-ref-t1-r2
 model_preset: configs/models/proxy/e-proxy-ref-t1.yaml
