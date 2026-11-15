@@ -187,7 +187,7 @@ def _(config_choice, mo):
     summary = {
         "run_id": config.run_id,
         "model": f"{preset.name} ({preset.architecture.value})",
-        "parameters": f"{params.total_parameters / 1e6:.1f}M",
+        "parameters": f"{params.total / 1e6:.1f}M",
         "objective": config.objective
         + (f" (mask {config.mask_rate:.0%})" if config.objective == "mlm" else ""),
         "tokens": f"{config.total_tokens / 1e9:.3f}B",
@@ -253,7 +253,7 @@ def _(config, corpus, mode, mo, params, run_store, train_button, work_root):
 
     steady = [r["tokens_per_second"] for r in records[len(records) // 2 :]]
     tokens_per_second = sum(steady) / max(1, len(steady))
-    flops = 6 * params.total_parameters * tokens_per_second
+    flops = 6 * params.total * tokens_per_second
     hours_left = (config.total_steps - result.final_step) * config.tokens_per_step
     hours_left /= max(tokens_per_second, 1.0) * 3600
     mo.md(
