@@ -198,6 +198,9 @@ class Pretrainer:
             torch.backends.cudnn.allow_tf32 = True
 
         model = build_model(self.preset, seed=cfg.seed).to(self.device)
+        # The compiled wrapper shares parameters with ``model``; state is saved from and
+        # evaluation runs on the eager module.
+        train_model = torch.compile(model, dynamic=False) if cfg.compile else model
         optimizer = self._optimizer(model)
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, _cosine_schedule(cfg))
         objective = self._objective()
@@ -244,59 +247,70 @@ class Pretrainer:
         session_steps = 0
         model.train()
 
+        # Per-step values stay on the device and are read back in one transfer per log
+        # window, so the host never waits for the GPU between steps.
+        pending: list[tuple[int, torch.Tensor, torch.Tensor, float, int]] = []
+        window = (time.perf_counter(), data.consumed_tokens)
+        pin = self.device.type == "cuda"
+
         while step < cfg.total_steps:
-            started = time.perf_counter()
-            loss_sum = 0.0
+            loss_sum = torch.zeros((), dtype=torch.float64, device=self.device)
             for micro in range(cfg.grad_accum_steps):
                 inputs = objective(data.next_batch(), step * cfg.grad_accum_steps + micro)
-                inputs = {k: v.to(self.device, non_blocking=True) for k, v in inputs.items()}
+                inputs = {
+                    k: (v.pin_memory() if pin else v).to(self.device, non_blocking=True)
+                    for k, v in inputs.items()
+                }
                 with torch.autocast(self.device.type, torch.bfloat16, enabled=autocast):
-                    loss = model(**inputs).loss / cfg.grad_accum_steps
+                    loss = train_model(**inputs).loss / cfg.grad_accum_steps
                 loss.backward()
-                loss_sum += float(loss.detach())
-            grad_norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip))
+                loss_sum += loss.detach()
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
             optimizer.step()
             scheduler.step()
             optimizer.zero_grad(set_to_none=True)
             step += 1
             session_steps += 1
-            elapsed = time.perf_counter() - started
-            result.losses[step] = loss_sum
-            record = {
-                "step": step,
-                "loss": round(loss_sum, 6),
-                "lr": scheduler.get_last_lr()[0],
-                "grad_norm": round(grad_norm, 4),
-                "tokens": data.consumed_tokens,
-                "tokens_per_second": round(cfg.tokens_per_step / elapsed, 1),
-            }
-            if self.device.type == "cuda":
-                record["max_memory_gib"] = round(torch.cuda.max_memory_allocated() / 2**30, 2)
-            if cfg.eval_every_steps and step % cfg.eval_every_steps == 0:
-                record.update(self._evaluate(model, eval_objective, eval_batches, autocast))
-                self._store_eval(result, step, record)
-            self._pending_metrics.append(record)
-            if step % cfg.log_every_steps == 0 or step == cfg.total_steps:
-                self.log(record)
+            pending.append(
+                (
+                    step,
+                    loss_sum,
+                    grad_norm.detach(),
+                    float(scheduler.get_last_lr()[0]),
+                    data.consumed_tokens,
+                )
+            )
 
-            if stop_after_steps is not None and session_steps >= stop_after_steps:
-                result.status = "interrupted"
-                break
             finished = step >= cfg.total_steps
+            interrupted = stop_after_steps is not None and session_steps >= stop_after_steps
             due = (cfg.checkpoint_every_steps and step % cfg.checkpoint_every_steps == 0) or (
                 cfg.checkpoint_every_minutes
                 and time.monotonic() - last_checkpoint_time >= cfg.checkpoint_every_minutes * 60
             )
             pause = self.clock.should_stop()
+            evaluate = bool(cfg.eval_every_steps and step % cfg.eval_every_steps == 0) or (
+                finished and not interrupted
+            )
+            log_now = step % cfg.log_every_steps == 0 or finished
+            if not (log_now or evaluate or interrupted or due or pause):
+                continue
+
+            record, window = self._flush(pending, result, window)
+            if evaluate:
+                record.update(self._evaluate(model, eval_objective, eval_batches, autocast))
+                self._store_eval(result, step, record)
+                window = (time.perf_counter(), data.consumed_tokens)  # exclude eval time
+            if log_now or evaluate:
+                self.log(record)
+            pause = pause or self.clock.should_stop()
+            if interrupted:
+                result.status = "interrupted"
+                break
             if (finished or due or pause) and step != last_checkpoint_step:
-                if finished and step not in result.evaluations:
-                    final = self._evaluate(model, eval_objective, eval_batches, autocast)
-                    record.update(final)
-                    self._store_eval(result, step, record)
-                    self.log({"step": step, **final})
                 self._checkpoint(model, optimizer, scheduler, data, step, restored, publisher)
                 result.published_steps.append(step)
                 last_checkpoint_step, last_checkpoint_time = step, time.monotonic()
+                window = (time.perf_counter(), data.consumed_tokens)
             if pause and not finished:
                 result.status = "paused"
                 break
@@ -326,6 +340,33 @@ class Pretrainer:
         )
         count = max(1, math.ceil(cfg.eval_sequences / cfg.micro_batch_size))
         return [loader.next_batch() for _ in range(count)]
+
+    def _flush(
+        self,
+        pending: list[tuple[int, torch.Tensor, torch.Tensor, float, int]],
+        result: TrainResult,
+        window: tuple[float, int],
+    ) -> tuple[dict[str, Any], tuple[float, int]]:
+        """Read back pending step values in one transfer; return the last record."""
+        values = torch.stack([torch.stack([loss, norm.double()]) for _, loss, norm, *_ in pending])
+        now = time.perf_counter()
+        record: dict[str, Any] = {}
+        for (step, _, _, lr, tokens), (loss, norm) in zip(pending, values.tolist(), strict=True):
+            result.losses[step] = loss
+            record = {
+                "step": step,
+                "loss": round(loss, 6),
+                "lr": lr,
+                "grad_norm": round(norm, 4),
+                "tokens": tokens,
+            }
+            self._pending_metrics.append(record)
+        started, start_tokens = window
+        record["tokens_per_second"] = round((record["tokens"] - start_tokens) / (now - started), 1)
+        if self.device.type == "cuda":
+            record["max_memory_gib"] = round(torch.cuda.max_memory_allocated() / 2**30, 2)
+        pending.clear()
+        return record, (now, record["tokens"])
 
     @staticmethod
     def _store_eval(result: TrainResult, step: int, record: dict[str, Any]) -> None:

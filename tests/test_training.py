@@ -1,4 +1,6 @@
 import datetime as dt
+import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -250,3 +252,19 @@ def test_shipped_train_configs_are_valid(path):
     assert config.seq_len <= preset.max_position_embeddings
     vocab_of = {"t1-bbpe-20544": 20544, "t2-bbpe-32k": 32000}
     assert preset.vocab_size == vocab_of[Path(config.tokenized).name]
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" and shutil.which("cl") is None,
+    reason="torch.compile on CPU needs a C++ compiler (MSVC cl on Windows)",
+)
+def test_compiled_training_matches_eager(tmp_path, tokenized):
+    eager = Pretrainer(
+        _config(tmp_path, tokenized), LocalObjectStore(tmp_path / "a"), tmp_path / "wa"
+    ).run()
+    config = _config(tmp_path, tokenized, compile=True, deterministic=False)
+    assert config.identity_sha256() == _config(tmp_path, tokenized).identity_sha256()
+    compiled = Pretrainer(config, LocalObjectStore(tmp_path / "b"), tmp_path / "wb").run()
+    assert compiled.status == "completed"
+    for step, loss in eager.losses.items():
+        assert compiled.losses[step] == pytest.approx(loss, rel=1e-3)

@@ -166,10 +166,10 @@ def _(mo, run_configs):
     config_choice = mo.ui.dropdown(options=run_configs, value=default, label="Run configuration")
     mode = mo.ui.radio(
         options={
-            "Throughput test (40 steps, nothing saved)": "bench",
+            "Throughput test (60 steps, nothing saved)": "bench",
             "Train / resume": "train",
         },
-        value="Throughput test (40 steps, nothing saved)",
+        value="Throughput test (60 steps, nothing saved)",
         label="Mode",
     )
     mo.vstack([config_choice, mode])
@@ -246,11 +246,12 @@ def _(config, corpus, mode, mo, params, run_store, train_button, work_root):
         )
         store = LocalObjectStore(work_root / "bench-store")
         result = Pretrainer(run_config, store, work_root / "bench", log=log).run(
-            stop_after_steps=40
+            stop_after_steps=60
         )
     else:
         result = Pretrainer(config, run_store, work_root / "run", log=log).run()
 
+    # Later log windows only: the first ones include torch.compile and warmup.
     steady = [r["tokens_per_second"] for r in records[len(records) // 2 :]]
     tokens_per_second = sum(steady) / max(1, len(steady))
     flops = 6 * params.total * tokens_per_second

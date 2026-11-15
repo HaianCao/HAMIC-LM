@@ -61,6 +61,8 @@ class PretrainConfig:
         cross_document_attention: Packed rows attend across document boundaries.
         device: ``"auto"``, ``"cuda"`` or ``"cpu"``.
         deterministic: Force deterministic kernels (slower; used by tests and drills).
+        compile: Wrap the model in ``torch.compile`` for training (fused kernels; the first
+            steps pay the compilation time). Operational: it does not change the math.
         log_every_steps: Metric logging cadence.
         eval_every_steps: Validation cadence (0 disables periodic evaluation).
         eval_sequences: Validation sequences per evaluation.
@@ -94,6 +96,7 @@ class PretrainConfig:
     cross_document_attention: bool = True
     device: str = "auto"
     deterministic: bool = False
+    compile: bool = False
     log_every_steps: int = 10
     eval_every_steps: int = 500
     eval_sequences: int = 256
