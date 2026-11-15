@@ -147,17 +147,33 @@ def _model_class(family: ModelFamily, config: Any) -> Any:
     return auto._model_mapping[type(config)]
 
 
-def build_model(preset: ModelPreset, device: str = "cpu", seed: int | None = None) -> Any:
+def build_model(
+    preset: ModelPreset,
+    device: str = "cpu",
+    seed: int | None = None,
+    attn_implementation: str | None = None,
+    sparse_prediction: bool = False,
+) -> Any:
     """Instantiate the pretraining model (masked LM or causal LM) for ``preset``.
 
     Args:
         preset: Model preset.
         device: ``"meta"`` builds shapes only (no memory) for parameter counting.
         seed: Optional seed for reproducible initialization.
+        attn_implementation: Transformers attention backend (``"sdpa"``,
+            ``"flex_attention"``...); ``None`` keeps the library default.
+        sparse_prediction: ModernBERT only: run the MLM head on labelled positions only.
+            The loss is unchanged; the saved config keeps it, so export resets it.
     """
     import torch
 
     config = build_config(preset)
+    if attn_implementation is not None:
+        config._attn_implementation = attn_implementation
+    if sparse_prediction:
+        if preset.architecture is not Architecture.MODERNBERT:
+            raise ValueError("sparse_prediction is a ModernBERT option")
+        config.sparse_prediction = True
     model_class = _model_class(preset.family, config)
     if seed is not None:
         torch.manual_seed(seed)

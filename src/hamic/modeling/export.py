@@ -51,6 +51,9 @@ def export_pretrained(
         raise ValueError(
             f"Tokenizer has {len(tokenizer)} entries but the model expects {preset.vocab_size}"
         )
+    if getattr(model.config, "sparse_prediction", False):
+        # Training-time shortcut only; released models predict every position.
+        model.config.sparse_prediction = False
     model.save_pretrained(out, safe_serialization=True)
     tokenizer.save_pretrained(out)
     metadata_file = Path(tokenizer_dir) / "hamic_tokenizer.json"

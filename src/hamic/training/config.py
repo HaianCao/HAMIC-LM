@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +34,23 @@ _IDENTITY_FIELDS = (
     "shuffle",
 )
 
+# Trajectory fields added after the first runs. They join the identity only when they
+# differ from their default, so the hashes of earlier runs stay valid.
+_OPTIONAL_IDENTITY_FIELDS = (
+    "lr_schedule",
+    "decay_ratio",
+    "cross_document_attention",
+    "source_weights",
+    "mask_rate_final",
+    "mask_schedule_start",
+    "masking",
+    "variant_share",
+)
+
+LR_SCHEDULES = ("cosine", "wsd")
+MASKING_UNITS = ("token", "span", "pmi")
+ATTENTION_BACKENDS = ("sdpa", "flex_attention")
+
 
 @dataclass(frozen=True)
 class PretrainConfig:
@@ -58,7 +75,30 @@ class PretrainConfig:
         precision: ``"bf16"`` (autocast on CUDA) or ``"fp32"``.
         seed: Seed for initialization, data order and masking.
         shuffle: Shuffle documents per epoch.
-        cross_document_attention: Packed rows attend across document boundaries.
+        cross_document_attention: Packed rows attend across document boundaries. ``False``
+            restricts attention to each document (ModernBERT encoders only).
+        lr_schedule: ``"cosine"`` (warmup then cosine to the floor) or ``"wsd"``
+            (warmup, constant peak, then a linear decay to the floor over the last
+            :attr:`decay_ratio` of the steps).
+        decay_ratio: Share of steps in the WSD decay phase.
+        source_weights: Per-source sampling multipliers for the train split, e.g.
+            ``{"wikipedia-vi-20231101": 2.0}`` visits each Wikipedia document twice per
+            epoch (fractions are sampled per epoch). Needs per-document source ids in the
+            tokenized shards.
+        mask_rate_final: MLM rate at the last step; the rate moves linearly from
+            :attr:`mask_rate` to this value, starting at :attr:`mask_schedule_start`
+            (share of steps). ``None`` keeps the rate constant.
+        mask_schedule_start: Share of steps before the mask rate starts to change.
+        masking: MLM selection unit: ``"token"``, ``"span"`` (geometric spans, SpanBERT)
+            or ``"pmi"`` (runs of tokens joined by high-PMI pairs mined from the train
+            split, a segmenter-free proxy for Vietnamese multi-syllable words).
+        variant_share: Share of selected MLM positions replaced by a Vietnamese variant of
+            the same token (other tone, no diacritics, teencode, other casing) while the
+            label stays the original. Taken first from the 10% random replacements, then
+            from the 80% ``<mask>`` replacements.
+        attention: Attention kernel, ``"sdpa"`` or ``"flex_attention"`` (operational).
+        sparse_prediction: Compute the MLM head only at labelled positions (ModernBERT;
+            same loss, less compute; operational).
         device: ``"auto"``, ``"cuda"`` or ``"cpu"``.
         deterministic: Force deterministic kernels (slower; used by tests and drills).
         compile: Wrap the model in ``torch.compile`` for training (fused kernels; the first
@@ -94,6 +134,15 @@ class PretrainConfig:
     seed: int = 1234
     shuffle: bool = True
     cross_document_attention: bool = True
+    lr_schedule: str = "cosine"
+    decay_ratio: float = 0.2
+    source_weights: dict[str, float] | None = None
+    mask_rate_final: float | None = None
+    mask_schedule_start: float = 0.0
+    masking: str = "token"
+    variant_share: float = 0.0
+    attention: str = "sdpa"
+    sparse_prediction: bool = False
     device: str = "auto"
     deterministic: bool = False
     compile: bool = False
@@ -114,6 +163,30 @@ class PretrainConfig:
             raise ValueError("precision must be 'bf16' or 'fp32'")
         if self.total_tokens < self.tokens_per_step:
             raise ValueError("total_tokens is smaller than one optimizer step")
+        if self.lr_schedule not in LR_SCHEDULES:
+            raise ValueError(f"lr_schedule must be one of {LR_SCHEDULES}")
+        if not 0 < self.decay_ratio <= 1:
+            raise ValueError("decay_ratio must be in (0, 1]")
+        if self.masking not in MASKING_UNITS:
+            raise ValueError(f"masking must be one of {MASKING_UNITS}")
+        if self.attention not in ATTENTION_BACKENDS:
+            raise ValueError(f"attention must be one of {ATTENTION_BACKENDS}")
+        if not 0 <= self.mask_schedule_start < 1:
+            raise ValueError("mask_schedule_start must be in [0, 1)")
+        if self.mask_rate_final is not None and not 0 < self.mask_rate_final < 1:
+            raise ValueError("mask_rate_final must be in (0, 1)")
+        if not 0 <= self.variant_share <= 0.9:
+            raise ValueError("variant_share must be in [0, 0.9]")
+        if any(w < 0 for w in (self.source_weights or {}).values()):
+            raise ValueError("source_weights must be non-negative")
+        mlm_only = (
+            self.masking != "token"
+            or self.variant_share
+            or self.mask_rate_final is not None
+            or self.sparse_prediction
+        )
+        if mlm_only and self.objective != "mlm":
+            raise ValueError("masking options apply to the MLM objective only")
 
     @property
     def tokens_per_step(self) -> int:
@@ -133,7 +206,12 @@ class PretrainConfig:
     def identity(self) -> dict[str, Any]:
         """Fields that define the trajectory; their hash gates strict resume."""
         data = asdict(self)
-        return {key: data[key] for key in _IDENTITY_FIELDS}
+        identity = {key: data[key] for key in _IDENTITY_FIELDS}
+        defaults = {f.name: f.default for f in fields(self)}
+        for key in _OPTIONAL_IDENTITY_FIELDS:
+            if data[key] != defaults[key]:
+                identity[key] = data[key]
+        return identity
 
     def identity_sha256(self) -> str:
         """Hash of :meth:`identity`."""
@@ -156,6 +234,10 @@ class PretrainConfig:
         values.pop("version", None)
         if "betas" in values:
             values["betas"] = tuple(float(b) for b in values["betas"])
+        if values.get("source_weights") is not None:
+            values["source_weights"] = {
+                str(k): float(v) for k, v in values["source_weights"].items()
+            }
         for key in ("total_tokens",):
             if key in values:
                 values[key] = int(float(values[key]))

@@ -123,6 +123,14 @@ def _cmd_corpus_pull(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_corpus_annotate(args: argparse.Namespace) -> int:
+    from hamic.data import annotate_sources
+
+    manifest = annotate_sources(args.corpus, args.tokenized)
+    _print_json({"tokenized": args.tokenized, "source_ids": manifest["source_ids"]})
+    return 0
+
+
 def _cmd_tokenizer_train(args: argparse.Namespace) -> int:
     from hamic.tokenization import TokenizerKind, TokenizerSpec, export_tokenizer, train_tokenizer
 
@@ -279,6 +287,14 @@ def _parser() -> argparse.ArgumentParser:
     pull.add_argument("--out", required=True, help="local tokenized directory")
     pull.add_argument("--prefix", help=prefix_help)
     pull.set_defaults(func=_cmd_corpus_pull)
+
+    annotate = corpus.add_parser(
+        "annotate-sources",
+        help="add per-document source ids to shards tokenized without them",
+    )
+    annotate.add_argument("--corpus", required=True, help="frozen corpus the shards came from")
+    annotate.add_argument("--tokenized", required=True, help="tokenized directory to update")
+    annotate.set_defaults(func=_cmd_corpus_annotate)
 
     tok = sub.add_parser("tokenizer", help="tokenizer training and evaluation").add_subparsers(
         dest="tokenizer_command", required=True

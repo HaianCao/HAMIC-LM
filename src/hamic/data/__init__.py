@@ -32,6 +32,7 @@ from hamic.data.stages import (
 from hamic.data.tokenized import (
     TokenizedCorpus,
     TokenizedShard,
+    annotate_sources,
     fetch_tokenized,
     publish_tokenized,
     tokenize_corpus,
@@ -63,6 +64,7 @@ __all__ = [
     "TokenizedCorpus",
     "TokenizedShard",
     "UseCase",
+    "annotate_sources",
     "default_stages",
     "fetch_tokenized",
     "publish_tokenized",

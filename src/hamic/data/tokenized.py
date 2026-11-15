@@ -5,7 +5,10 @@ Each shard is a pair of ``.npy`` files:
 * ``<name>.tokens.npy``: all token ids of the shard's documents, concatenated, as
   ``uint16`` when the vocabulary fits (HAMIC's ~20K/32K vocabularies) else ``uint32``;
 * ``<name>.offsets.npy``: ``int64`` document boundaries, ``documents + 1`` entries, so
-  document ``i`` is ``tokens[offsets[i]:offsets[i + 1]]``.
+  document ``i`` is ``tokens[offsets[i]:offsets[i + 1]]``;
+* ``<name>.sources.npy`` (optional): ``uint8`` index of each document's source into the
+  manifest's ``source_ids`` list. Written by :func:`tokenize_corpus`; added to older
+  directories by :func:`annotate_sources`.
 
 Ids carry **no special tokens**: adding ``<s>``/``</s>``, packing and masking belong to the
 training data loader. A copy of ``tokenizer.json`` travels with the shards, so a tokenized
@@ -33,6 +36,7 @@ if TYPE_CHECKING:
 __all__ = [
     "TokenizedCorpus",
     "TokenizedShard",
+    "annotate_sources",
     "fetch_tokenized",
     "publish_tokenized",
     "tokenize_corpus",
@@ -63,11 +67,13 @@ class _ShardSink:
         self.shards: list[dict[str, Any]] = []
         self._chunks: list[np.ndarray[Any, Any]] = []
         self._lengths: list[int] = []
+        self._sources: list[int] = []
         self._pending = 0
 
-    def add(self, ids: list[int]) -> None:
+    def add(self, ids: list[int], source: int) -> None:
         self._chunks.append(np.asarray(ids, dtype=self.dtype))
         self._lengths.append(len(ids))
+        self._sources.append(source)
         self._pending += len(ids)
         if self._pending >= self.shard_tokens:
             self.flush()
@@ -92,20 +98,44 @@ class _ShardSink:
                 "files": {
                     "tokens": {"path": token_path.name, "sha256": file_sha256(token_path)},
                     "offsets": {"path": offset_path.name, "sha256": file_sha256(offset_path)},
+                    "sources": _write_sources(self.directory, name, self._sources),
                 },
             }
         )
-        self._chunks, self._lengths, self._pending = [], [], 0
+        self._chunks, self._lengths, self._sources, self._pending = [], [], [], 0
 
 
-def _batched_texts(files: Iterable[Path], batch_size: int) -> Iterator[list[str]]:
-    batch: list[str] = []
-    for path in files:
-        for document in read_jsonl(path):
-            batch.append(document.text)
-            if len(batch) >= batch_size:
-                yield batch
-                batch = []
+def _write_sources(directory: Path, name: str, sources: list[int]) -> dict[str, str]:
+    path = directory / f"{name}.sources.npy"
+    np.save(path, np.asarray(sources, dtype=np.uint8), allow_pickle=False)
+    return {"path": path.name, "sha256": file_sha256(path)}
+
+
+def _source_ids(source_manifest: dict[str, Any]) -> list[str]:
+    ids = [str(s["source_id"]) for s in source_manifest.get("sources", [])]
+    if len(ids) > np.iinfo(np.uint8).max + 1:
+        raise ValueError("At most 256 sources fit the uint8 source index")
+    return ids
+
+
+def _split_documents(
+    corpus: Path, source_manifest: dict[str, Any], split: str
+) -> Iterator[tuple[str, str]]:
+    """Yield ``(text, source_id)`` of a split in the order the tokenizer reads them."""
+    for entry in source_manifest["splits"][split]["files"]:
+        for document in read_jsonl(corpus / entry["path"]):
+            yield document.text, document.source_id
+
+
+def _batched(
+    documents: Iterable[tuple[str, str]], batch_size: int
+) -> Iterator[list[tuple[str, str]]]:
+    batch: list[tuple[str, str]] = []
+    for document in documents:
+        batch.append(document)
+        if len(batch) >= batch_size:
+            yield batch
+            batch = []
     if batch:
         yield batch
 
@@ -146,14 +176,16 @@ def tokenize_corpus(
     vocab_size = int(tokenizer.get_vocab_size())
     dtype = _dtype_for(vocab_size)
     source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+    source_ids = _source_ids(source_manifest)
+    source_index = {source_id: i for i, source_id in enumerate(source_ids)}
 
     splits: dict[str, Any] = {}
     for split in SPLITS:
-        files = [corpus / f["path"] for f in source_manifest["splits"][split]["files"]]
         sink = _ShardSink(out / split, split, dtype, shard_tokens)
-        for texts in _batched_texts(files, batch_size):
-            for encoding in tokenizer.encode_batch(texts, add_special_tokens=False):
-                sink.add(encoding.ids)
+        for batch in _batched(_split_documents(corpus, source_manifest, split), batch_size):
+            encodings = tokenizer.encode_batch([t for t, _ in batch], add_special_tokens=False)
+            for encoding, (_, source_id) in zip(encodings, batch, strict=True):
+                sink.add(encoding.ids, source_index[source_id])
         sink.flush()
         splits[split] = {
             "documents": sum(s["documents"] for s in sink.shards),
@@ -182,14 +214,61 @@ def tokenize_corpus(
             "corpus_version": source_manifest.get("corpus_version"),
             "manifest_sha256": file_sha256(source_manifest_path),
         },
+        "source_ids": source_ids,
         "splits": splits,
         "code": code_revision(),
     }
     out.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(tokenizer_file, out / TOKENIZER_NAME)
-    (out / MANIFEST_NAME).write_text(
+    _write_manifest(out, manifest)
+    return manifest
+
+
+def _write_manifest(directory: Path, manifest: dict[str, Any]) -> None:
+    """Write the manifest atomically (it is the last file of a valid directory)."""
+    target = directory / MANIFEST_NAME
+    staging = directory / f"{MANIFEST_NAME}.tmp"
+    staging.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
     )
+    staging.replace(target)
+
+
+def annotate_sources(corpus_dir: str | Path, tokenized_dir: str | Path) -> dict[str, Any]:
+    """Add per-document source ids to a tokenized directory written without them.
+
+    Reads the frozen corpus in the order :func:`tokenize_corpus` read it, checks that the
+    document counts of every shard match, writes ``<shard>.sources.npy`` files and rewrites
+    the manifest. Token files are untouched, so training on the directory is unchanged.
+
+    Raises:
+        ValueError: The corpus is not the one the shards were tokenized from.
+    """
+    corpus = Path(corpus_dir)
+    tokenized = TokenizedCorpus(tokenized_dir, verify=True)
+    source_manifest_path = corpus / SOURCE_MANIFEST
+    manifest = tokenized.manifest
+    if file_sha256(source_manifest_path) != manifest["source_corpus"]["manifest_sha256"]:
+        raise ValueError(f"{corpus} is not the corpus these shards were tokenized from")
+    source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+    source_ids = _source_ids(source_manifest)
+    source_index = {source_id: i for i, source_id in enumerate(source_ids)}
+    for split in SPLITS:
+        documents = _split_documents(corpus, source_manifest, split)
+        for shard in manifest["splits"][split]["shards"]:
+            sources = [
+                source_index[source_id]
+                for _, (_, source_id) in zip(range(shard["documents"]), documents, strict=False)
+            ]
+            if len(sources) != shard["documents"]:
+                raise ValueError(f"Corpus ended before shard {shard['name']} was complete")
+            shard["files"]["sources"] = _write_sources(
+                tokenized.directory / split, shard["name"], sources
+            )
+        if next(documents, None) is not None:
+            raise ValueError(f"Corpus split {split!r} has more documents than the shards")
+    manifest["source_ids"] = source_ids
+    _write_manifest(tokenized.directory, manifest)
     return manifest
 
 
@@ -199,6 +278,7 @@ class TokenizedShard:
 
     tokens: np.ndarray[Any, Any]
     offsets: np.ndarray[Any, Any]
+    sources: np.ndarray[Any, Any] | None = None
 
     def __len__(self) -> int:
         return int(self.offsets.size - 1)
@@ -229,6 +309,12 @@ class TokenizedCorpus:
         """Vocabulary size of the tokenizer that produced the shards."""
         return int(self.manifest["tokenizer"]["vocab_size"])
 
+    @property
+    def source_ids(self) -> list[str] | None:
+        """Source ids indexed by ``TokenizedShard.sources`` (``None``: not recorded)."""
+        ids = self.manifest.get("source_ids")
+        return list(ids) if ids is not None else None
+
     def verify(self) -> None:
         """Raise ``ValueError`` if any shard file differs from its recorded checksum."""
         for split, info in self.manifest["splits"].items():
@@ -237,6 +323,20 @@ class TokenizedCorpus:
                     path = self.directory / split / entry["path"]
                     if file_sha256(path) != entry["sha256"]:
                         raise ValueError(f"Checksum mismatch: {path}")
+
+    def tokenizer_file(self) -> Path:
+        """Path of the ``tokenizer.json`` copy, checked against the manifest hash.
+
+        Raises:
+            FileNotFoundError: The directory has no tokenizer copy.
+            ValueError: The copy does not match the manifest.
+        """
+        path = self.directory / TOKENIZER_NAME
+        if not path.is_file():
+            raise FileNotFoundError(f"{self.directory} has no {TOKENIZER_NAME}")
+        if file_sha256(path) != self.manifest["tokenizer"]["sha256"]:
+            raise ValueError(f"{path} does not match the tokenizer recorded in the manifest")
+        return path
 
     def token_byte_lengths(self) -> np.ndarray[Any, Any]:
         """UTF-8 bytes each token id decodes to (``0`` for special and added tokens).
@@ -249,12 +349,7 @@ class TokenizedCorpus:
             FileNotFoundError: The directory has no tokenizer copy.
             ValueError: The copy does not match the manifest, or is not byte-level BPE.
         """
-        path = self.directory / TOKENIZER_NAME
-        if not path.is_file():
-            raise FileNotFoundError(f"{self.directory} has no {TOKENIZER_NAME}")
-        if file_sha256(path) != self.manifest["tokenizer"]["sha256"]:
-            raise ValueError(f"{path} does not match the tokenizer recorded in the manifest")
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(self.tokenizer_file().read_text(encoding="utf-8"))
         if data.get("decoder", {}).get("type") != "ByteLevel":
             raise ValueError("Byte lengths need a byte-level tokenizer")
         lengths = np.zeros(self.vocab_size, dtype=np.int64)
@@ -268,9 +363,11 @@ class TokenizedCorpus:
         """Yield memory-mapped shards of ``split`` in order."""
         for shard in self.manifest["splits"][split]["shards"]:
             base = self.directory / split
+            files = shard["files"]
             yield TokenizedShard(
-                tokens=np.load(base / shard["files"]["tokens"]["path"], mmap_mode="r"),
-                offsets=np.load(base / shard["files"]["offsets"]["path"], mmap_mode="r"),
+                tokens=np.load(base / files["tokens"]["path"], mmap_mode="r"),
+                offsets=np.load(base / files["offsets"]["path"], mmap_mode="r"),
+                sources=(np.load(base / files["sources"]["path"]) if "sources" in files else None),
             )
 
     def documents(self, split: str) -> Iterator[np.ndarray[Any, Any]]:

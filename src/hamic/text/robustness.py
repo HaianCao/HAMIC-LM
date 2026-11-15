@@ -1,10 +1,12 @@
 """Text perturbations used by the Vietnamese robustness evaluation suite.
 
 These transforms produce the variants a Vietnamese model meets in the wild: text without
-diacritics, decomposed Unicode and social-media spelling ("teencode"). They are
-evaluation tools only and are never applied to training data. The teencode lexicon and
-rules live in ``hamic/resources/teencode.yaml``; randomness is always seeded so a
-perturbed test set is reproducible.
+diacritics, decomposed Unicode and social-media spelling ("teencode"). They build the
+robustness test sets, and ``hamic.training.masking.VariantTable`` uses them to list
+spelling variants of vocabulary entries for the optional variant corruption of MLM
+pretraining (training text itself is never rewritten). The teencode lexicon and rules
+live in ``hamic/resources/teencode.yaml``; randomness is always seeded so a perturbed
+test set is reproducible.
 """
 
 from __future__ import annotations

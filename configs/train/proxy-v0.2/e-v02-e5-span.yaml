@@ -1,0 +1,28 @@
+# E-proxy v0.2 round. E5: geometric span masking (SpanBERT; p=0.2, at most 10 tokens).
+version: 1
+run_id: e-v02-e5-span
+model_preset: configs/models/proxy/e-proxy-m-t1.yaml
+tokenized: data/tokenized/v0.2/t1-bbpe-20544
+objective: mlm
+mask_rate: 0.30
+seq_len: 512
+micro_batch_size: 128
+grad_accum_steps: 4          # 262,144 tokens per optimizer step
+total_tokens: 5.0e8
+learning_rate: 8.0e-4
+warmup_ratio: 0.06
+min_lr_ratio: 0.1
+betas: [0.9, 0.98]
+weight_decay: 0.01
+grad_clip: 1.0
+precision: bf16
+seed: 1234
+device: auto
+compile: true                # operational
+sparse_prediction: true      # operational: MLM head on labelled positions only (same loss)
+log_every_steps: 10
+eval_every_steps: 250
+eval_sequences: 2048
+eval_mask_rate: 0.15        # validation always masks 15%, token-level, no variants
+checkpoint_every_minutes: 30
+masking: span

@@ -1,0 +1,22 @@
+# Corpus v0.2: ~10x the pilot, for the E100M pilot and candidate runs (2-4B tokens).
+# Same sources and revisions as pilot-v0.1, streamed from the start, so v0.2 contains the
+# pilot documents. Target: about 3-3.5B T1 train tokens after filtering and dedup.
+sources:
+  - type: huggingface
+    source_id: wikipedia-vi-20231101
+    dataset: wikimedia/wikipedia
+    config: 20231101.vi
+    revision: b04c8d1ceb2f5cd4588862100d08de323dccfbaa
+    text_field: text
+    id_field: id
+    meta_fields: [url, title]
+    # No limit: the whole Vietnamese Wikipedia snapshot (~1.3M articles).
+  - type: huggingface
+    source_id: fineweb2-vie-latn
+    dataset: HuggingFaceFW/fineweb-2
+    config: vie_Latn
+    revision: af9c13333eb981300149d5ca60a8e9d659b276b9
+    text_field: text
+    id_field: id
+    meta_fields: [url, date]
+    limit: 3500000

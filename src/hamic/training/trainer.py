@@ -17,18 +17,30 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 
 from hamic.checkpoint.remote import CheckpointPublisher, CheckpointResolver
 from hamic.checkpoint.storage import ObjectStore
 from hamic.data.tokenized import TokenizedCorpus
 from hamic.modeling.factory import build_model
-from hamic.modeling.presets import ModelPreset
+from hamic.modeling.presets import Architecture, ModelPreset
 from hamic.provenance import code_revision, environment_fingerprint, utc_now
 from hamic.runtime.session import HOUR, SessionClock
+from hamic.training.attention import DocumentMask, document_ids
 from hamic.training.compat import check_strict_resume
 from hamic.training.config import PretrainConfig
 from hamic.training.data import PackedBatches
+from hamic.training.masking import (
+    MaskRateSchedule,
+    PmiUnits,
+    SelectionUnits,
+    SpanUnits,
+    TokenUnits,
+    VariantTable,
+    mine_pmi_pairs,
+    word_tokens,
+)
 from hamic.training.objectives import CausalLM, MaskedLM, Objective
 from hamic.training.state import SAVED_STATE, load_training_state, save_training_state
 
@@ -36,6 +48,7 @@ __all__ = ["Pretrainer", "TrainResult"]
 
 COMPLETE_NAME = "COMPLETE.json"
 _EVAL_SEED_OFFSET = 1 << 40
+_PMI_TOKENS = 100_000_000
 
 
 @dataclass
@@ -66,16 +79,32 @@ class TrainResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def _cosine_schedule(config: PretrainConfig) -> Callable[[int], float]:
-    total, warmup, floor = config.total_steps, config.warmup_steps, config.min_lr_ratio
+def lr_schedule(config: PretrainConfig) -> Callable[[int], float]:
+    """Learning-rate multiplier per optimizer step (for ``LambdaLR``).
 
-    def factor(step: int) -> float:
+    ``cosine``: linear warmup, then cosine from the peak to ``min_lr_ratio``.
+    ``wsd``: linear warmup, constant peak, then a linear decay to ``min_lr_ratio`` over the
+    last ``decay_ratio`` of the steps. The constant phase does not depend on the total, so a
+    run can be extended (or a decay branched off a checkpoint) without changing its past.
+    """
+    total, warmup, floor = config.total_steps, config.warmup_steps, config.min_lr_ratio
+    decay_start = max(warmup, total - max(1, round(total * config.decay_ratio)))
+
+    def cosine(step: int) -> float:
         if step < warmup:
             return (step + 1) / warmup
         progress = min(1.0, (step - warmup) / max(1, total - warmup))
         return floor + (1 - floor) * 0.5 * (1 + math.cos(math.pi * progress))
 
-    return factor
+    def wsd(step: int) -> float:
+        if step < warmup:
+            return (step + 1) / warmup
+        if step < decay_start:
+            return 1.0
+        progress = min(1.0, (step - decay_start + 1) / max(1, total - decay_start))
+        return 1.0 - (1.0 - floor) * progress
+
+    return wsd if config.lr_schedule == "wsd" else cosine
 
 
 class Pretrainer:
@@ -121,6 +150,10 @@ class Pretrainer:
         self.device = torch.device(
             ("cuda" if torch.cuda.is_available() else "cpu") if wanted == "auto" else wanted
         )
+        if not config.cross_document_attention and (
+            self.preset.architecture is not Architecture.MODERNBERT
+        ):
+            raise ValueError("cross_document_attention=False is supported for ModernBERT only")
         self._pending_metrics: list[dict[str, Any]] = []
         self._byte_lengths: torch.Tensor | None = None
         if config.objective == "clm":
@@ -131,18 +164,71 @@ class Pretrainer:
 
     # -- construction ------------------------------------------------------------------
 
-    def _objective(self, mask_rate: float | None = None) -> Objective:
+    def _objective(self) -> Objective:
+        """Training objective with every configured masking option."""
+        cfg = self.config
+        if cfg.objective == "clm":
+            return CausalLM()
+        micro_steps = cfg.total_steps * cfg.grad_accum_steps
+        schedule = MaskRateSchedule(
+            start_rate=cfg.mask_rate,
+            end_rate=cfg.mask_rate_final,
+            start_step=round(cfg.mask_schedule_start * micro_steps),
+            end_step=micro_steps,
+        )
+        return self._masked_lm(
+            schedule,
+            units=self._selection_units(),
+            variant_share=cfg.variant_share,
+            variants=VariantTable.from_tokenizer_file(self.corpus.tokenizer_file())
+            if cfg.variant_share
+            else None,
+        )
+
+    def _eval_objective(self) -> Objective:
+        """Plain token-level MLM at a fixed rate, so validation loss stays comparable."""
+        cfg = self.config
+        if cfg.objective == "clm":
+            return CausalLM()
+        return self._masked_lm(MaskRateSchedule(cfg.eval_mask_rate or cfg.mask_rate))
+
+    def _masked_lm(self, schedule: MaskRateSchedule, **options: Any) -> MaskedLM:
         tokens = self.preset.special_tokens
         ordered = tokens.ordered
-        if self.config.objective == "clm":
-            return CausalLM()
         return MaskedLM(
-            mask_rate=mask_rate or self.config.mask_rate,
+            mask_rate=schedule,
             mask_id=ordered.index(tokens.mask),
             vocab_size=self.preset.vocab_size,
             special_ids=range(len(ordered)),
             seed=self.config.seed,
+            **options,
         )
+
+    def _selection_units(self) -> SelectionUnits:
+        special = range(len(self.preset.special_tokens.ordered))
+        if self.config.masking == "span":
+            return SpanUnits()
+        if self.config.masking == "pmi":
+            pairs = torch.from_numpy(self._pmi_pairs())
+            return PmiUnits(pairs, self.preset.vocab_size, special)
+        return TokenUnits()
+
+    def _pmi_pairs(self) -> np.ndarray[Any, Any]:
+        """Collocations mined from the first train tokens; cached per corpus revision."""
+        digest = self.corpus.manifest["source_corpus"]["manifest_sha256"][:16]
+        cache = self.workdir / f"pmi-pairs-{digest}.npy"
+        if cache.is_file():
+            cached: np.ndarray[Any, Any] = np.load(cache)
+            return cached
+        pairs = mine_pmi_pairs(
+            self.corpus.documents("train"),
+            self.preset.vocab_size,
+            special_ids=range(len(self.preset.special_tokens.ordered)),
+            max_tokens=_PMI_TOKENS,
+            eligible=word_tokens(self.corpus.tokenizer_file()),
+        )
+        np.save(cache, pairs, allow_pickle=False)
+        return pairs
 
     def _optimizer(self, model: torch.nn.Module) -> torch.optim.Optimizer:
         decay: list[torch.nn.Parameter] = []
@@ -197,14 +283,23 @@ class Pretrainer:
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
 
-        model = build_model(self.preset, seed=cfg.seed).to(self.device)
+        model = build_model(
+            self.preset,
+            seed=cfg.seed,
+            attn_implementation=cfg.attention,
+            sparse_prediction=cfg.sparse_prediction,
+        ).to(self.device)
+        layer_types = tuple(getattr(model.config, "layer_types", None) or ("full_attention",))
+        document_mask = (
+            None if cfg.cross_document_attention else DocumentMask(cfg.attention, layer_types)
+        )
         # The compiled wrapper shares parameters with ``model``; state is saved from and
         # evaluation runs on the eager module.
         train_model = torch.compile(model, dynamic=False) if cfg.compile else model
         optimizer = self._optimizer(model)
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, _cosine_schedule(cfg))
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule(cfg))
         objective = self._objective()
-        eval_objective = self._objective(cfg.eval_mask_rate)
+        eval_objective = self._eval_objective()
 
         restore_dir = self.workdir / "restore"
         shutil.rmtree(restore_dir, ignore_errors=True)
@@ -232,8 +327,10 @@ class Pretrainer:
             seed=cfg.seed,
             shuffle=cfg.shuffle,
             cursor=cursor,
+            source_weights=cfg.source_weights,
         )
-        eval_batches = self._eval_batches(ordered.index(special.bos), ordered.index(special.eos))
+        bos_id = ordered.index(special.bos)
+        eval_batches = self._eval_batches(bos_id, ordered.index(special.eos))
         autocast = cfg.precision == "bf16" and self.device.type == "cuda"
         publisher = CheckpointPublisher(self.store, self.run_prefix)
         result = TrainResult(
@@ -256,11 +353,14 @@ class Pretrainer:
         while step < cfg.total_steps:
             loss_sum = torch.zeros((), dtype=torch.float64, device=self.device)
             for micro in range(cfg.grad_accum_steps):
-                inputs = objective(data.next_batch(), step * cfg.grad_accum_steps + micro)
-                inputs = {
-                    k: (v.pin_memory() if pin else v).to(self.device, non_blocking=True)
-                    for k, v in inputs.items()
-                }
+                batch = data.next_batch()
+                inputs = self._to_device(
+                    objective(batch, step * cfg.grad_accum_steps + micro),
+                    batch,
+                    bos_id,
+                    document_mask,
+                    pin,
+                )
                 with torch.autocast(self.device.type, torch.bfloat16, enabled=autocast):
                     loss = train_model(**inputs).loss / cfg.grad_accum_steps
                 loss.backward()
@@ -297,7 +397,11 @@ class Pretrainer:
 
             record, window = self._flush(pending, result, window)
             if evaluate:
-                record.update(self._evaluate(model, eval_objective, eval_batches, autocast))
+                record.update(
+                    self._evaluate(
+                        model, eval_objective, eval_batches, autocast, bos_id, document_mask
+                    )
+                )
                 self._store_eval(result, step, record)
                 window = (time.perf_counter(), data.consumed_tokens)  # exclude eval time
             if log_now or evaluate:
@@ -326,6 +430,25 @@ class Pretrainer:
         return result
 
     # -- helpers ---------------------------------------------------------------------------
+
+    def _to_device(
+        self,
+        inputs: dict[str, torch.Tensor],
+        batch: torch.Tensor,
+        bos_id: int,
+        document_mask: DocumentMask | None,
+        pin: bool,
+    ) -> dict[str, Any]:
+        moved: dict[str, Any] = {
+            k: (v.pin_memory() if pin else v).to(self.device, non_blocking=pin)
+            for k, v in inputs.items()
+        }
+        if document_mask is not None:
+            documents = document_ids(batch, bos_id)
+            moved["attention_mask"] = document_mask(
+                (documents.pin_memory() if pin else documents).to(self.device, non_blocking=pin)
+            )
+        return moved
 
     def _eval_batches(self, bos_id: int, eos_id: int) -> list[torch.Tensor]:
         cfg = self.config
@@ -381,14 +504,17 @@ class Pretrainer:
         objective: Objective,
         batches: list[torch.Tensor],
         autocast: bool,
+        bos_id: int,
+        document_mask: DocumentMask | None,
     ) -> dict[str, float]:
         model.eval()
         total = 0.0
         nats = 0.0
         target_bytes = 0
         for index, batch in enumerate(batches):
-            inputs = objective(batch, _EVAL_SEED_OFFSET + index)
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            inputs = self._to_device(
+                objective(batch, _EVAL_SEED_OFFSET + index), batch, bos_id, document_mask, False
+            )
             with torch.autocast(self.device.type, torch.bfloat16, enabled=autocast):
                 loss = float(model(**inputs).loss)
             total += loss

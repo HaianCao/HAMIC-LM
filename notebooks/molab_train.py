@@ -177,8 +177,13 @@ def _(mo, run_configs):
     test_steps = mo.ui.number(start=10, stop=5000, step=10, value=60, label="Test steps")
     test_lr = mo.ui.text(value="", label="Test learning rate (empty: from config)")
     test_warmup = mo.ui.text(value="", label="Test warmup ratio (empty: from config)")
-    mo.vstack([config_choice, mode, mo.hstack([test_steps, test_lr, test_warmup])])
-    return config_choice, mode, test_lr, test_steps, test_warmup
+    test_attention = mo.ui.dropdown(
+        options=["from config", "sdpa", "flex_attention"],
+        value="from config",
+        label="Test attention kernel",
+    )
+    mo.vstack([config_choice, mode, mo.hstack([test_steps, test_lr, test_warmup, test_attention])])
+    return config_choice, mode, test_attention, test_lr, test_steps, test_warmup
 
 
 @app.cell
@@ -233,6 +238,7 @@ def _(
     mo,
     params,
     run_store,
+    test_attention,
     test_lr,
     test_steps,
     test_warmup,
@@ -259,6 +265,8 @@ def _(
             overrides["learning_rate"] = float(test_lr.value)
         if test_warmup.value.strip():
             overrides["warmup_ratio"] = float(test_warmup.value)
+        if test_attention.value != "from config":
+            overrides["attention"] = test_attention.value
         run_config = dataclasses.replace(
             config,
             run_id=f"{config.run_id}-bench",
@@ -269,7 +277,8 @@ def _(
         )
         print(
             f"Test run: lr={run_config.learning_rate:g}, "
-            f"warmup={run_config.warmup_steps} steps, stop after {int(test_steps.value)}",
+            f"warmup={run_config.warmup_steps} steps, attention={run_config.attention}, "
+            f"stop after {int(test_steps.value)}",
             flush=True,
         )
         import shutil as _shutil
