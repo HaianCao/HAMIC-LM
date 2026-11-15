@@ -80,6 +80,25 @@ def _cmd_corpus_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_corpus_tokenize(args: argparse.Namespace) -> int:
+    from hamic.data import tokenize_corpus
+
+    manifest = tokenize_corpus(
+        args.corpus, args.tokenizer, args.out, shard_tokens=args.shard_tokens
+    )
+    _print_json(
+        {
+            "tokenizer": manifest["tokenizer"]["name"],
+            "dtype": manifest["dtype"],
+            "splits": {
+                k: {"documents": v["documents"], "tokens": v["tokens"]}
+                for k, v in manifest["splits"].items()
+            },
+        }
+    )
+    return 0
+
+
 def _cmd_tokenizer_train(args: argparse.Namespace) -> int:
     from hamic.tokenization import TokenizerKind, TokenizerSpec, export_tokenizer, train_tokenizer
 
@@ -163,6 +182,27 @@ def _cmd_drill(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_train(args: argparse.Namespace) -> int:
+    from hamic.training import PretrainConfig, Pretrainer
+
+    config = PretrainConfig.from_yaml(args.config)
+    result = Pretrainer(config, _store(args.store), args.workdir).run(
+        stop_after_steps=args.stop_after_steps
+    )
+    _print_json(
+        {
+            "status": result.status,
+            "final_step": result.final_step,
+            "total_steps": config.total_steps,
+            "resumed_from_step": result.resumed_from_step,
+            "published_steps": result.published_steps,
+            "last_eval_loss": list(result.evaluations.values())[-1:] or None,
+            "warnings": result.warnings,
+        }
+    )
+    return 0 if result.status in {"completed", "paused", "already_complete"} else 1
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hamic", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -192,6 +232,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     build.set_defaults(func=_cmd_corpus_build)
 
+    tokenize = corpus.add_parser("tokenize", help="write memory-mappable token shards")
+    tokenize.add_argument("--corpus", required=True, help="frozen corpus directory")
+    tokenize.add_argument("--tokenizer", required=True, help="directory with tokenizer.json")
+    tokenize.add_argument("--out", required=True)
+    tokenize.add_argument("--shard-tokens", type=int, default=50_000_000)
+    tokenize.set_defaults(func=_cmd_corpus_tokenize)
+
     tok = sub.add_parser("tokenizer", help="tokenizer training and evaluation").add_subparsers(
         dest="tokenizer_command", required=True
     )
@@ -216,6 +263,13 @@ def _parser() -> argparse.ArgumentParser:
     compare = tok.add_parser("compare", help="print a Markdown comparison of eval reports")
     compare.add_argument("reports", nargs="+")
     compare.set_defaults(func=_cmd_tokenizer_compare)
+
+    train = sub.add_parser("train", help="pretrain (or resume) a model from a run config")
+    train.add_argument("--config", required=True, help="pretraining config YAML")
+    train.add_argument("--store", required=True, help="local:<dir> or hf:<namespace/repo>")
+    train.add_argument("--workdir", required=True, help="local scratch directory")
+    train.add_argument("--stop-after-steps", type=int, help="drill: stop without a checkpoint")
+    train.set_defaults(func=_cmd_train)
 
     drill = sub.add_parser("drill", help="checkpoint/strict-resume recovery drill")
     drill.add_argument("--store", required=True, help="local:<dir> or hf:<namespace/repo>")

@@ -52,16 +52,20 @@ class DataCursor:
     """Position in the training stream.
 
     Attributes:
-        shard_index: Index of the current shard.
-        offset: Next sequence/batch index inside the shard.
-        consumed_tokens: Real (non-padding) training tokens seen so far.
+        shard_index: Index of the current shard (unused by the packed loader).
+        offset: Next position: a batch index for the smoke stream, or the document's
+            position in the epoch permutation for the packed loader.
+        consumed_tokens: Training tokens fed to the model so far.
         epoch: Pass over the data.
+        token_offset: Tokens of the current document (with its ``<s>``/``</s>``) already
+            used, so packing resumes in the middle of a document.
     """
 
     shard_index: int = 0
     offset: int = 0
     consumed_tokens: int = 0
     epoch: int = 0
+    token_offset: int = 0
 
     def to_dict(self) -> dict[str, int]:
         """Return a JSON-friendly view."""

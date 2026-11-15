@@ -29,6 +29,7 @@ from hamic.data.stages import (
     SplitStage,
     Stage,
 )
+from hamic.data.tokenized import TokenizedCorpus, TokenizedShard, tokenize_corpus
 
 __all__ = [
     "ContaminationFilterStage",
@@ -53,8 +54,11 @@ __all__ = [
     "SplitConfig",
     "SplitStage",
     "Stage",
+    "TokenizedCorpus",
+    "TokenizedShard",
     "UseCase",
     "default_stages",
     "read_jsonl",
+    "tokenize_corpus",
     "write_jsonl",
 ]

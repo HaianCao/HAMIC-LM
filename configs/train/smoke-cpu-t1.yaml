@@ -1,0 +1,20 @@
+# End-to-end smoke run on the pilot shards with a tiny decoder on CPU.
+# Checks that real data flows through training, evaluation and checkpointing.
+version: 1
+run_id: smoke-cpu-t1
+model_preset: configs/models/smoke/d-tiny-t1.yaml
+tokenized: data/tokenized/pilot-v0.1/t1-bbpe-20544
+objective: clm
+seq_len: 256
+micro_batch_size: 8
+grad_accum_steps: 2
+total_tokens: 1.6e6
+learning_rate: 2.0e-3
+warmup_ratio: 0.05
+precision: fp32
+device: cpu
+log_every_steps: 25
+eval_every_steps: 100
+eval_sequences: 64
+checkpoint_every_steps: 200
+checkpoint_every_minutes: 0
