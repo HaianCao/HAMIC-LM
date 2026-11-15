@@ -21,7 +21,8 @@ dependencies = [
     "numpy>=1.26",
     "pyyaml>=6.0",
     "tokenizers>=0.21",
-    "transformers>=4.51",
+    # 5.14 rejects ModernBERT configs whose layers are all full attention.
+    "transformers>=5.23",
     "torch>=2.4",
     "safetensors>=0.4",
     "huggingface-hub>=0.30",
