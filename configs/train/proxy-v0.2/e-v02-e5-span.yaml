@@ -1,4 +1,6 @@
-# E-proxy v0.2 round. E5: geometric span masking (SpanBERT; p=0.2, at most 10 tokens).
+# E-proxy v0.2 round. E5: geometric span masking (SpanBERT p=0.2), at most 5 tokens (mean ~2.6) to stay
+# near Vietnamese word length; SpanBERT's 10 puts half the masked tokens in 6-10
+# token spans.
 version: 1
 run_id: e-v02-e5-span
 model_preset: configs/models/proxy/e-proxy-m-t1.yaml
@@ -26,3 +28,4 @@ eval_sequences: 2048
 eval_mask_rate: 0.15        # validation always masks 15%, token-level, no variants
 checkpoint_every_minutes: 30
 masking: span
+span_max_length: 5

@@ -197,8 +197,12 @@ def _unit_lengths(units: torch.Tensor) -> list[int]:
 def test_span_units_follow_spanbert_lengths():
     generator = torch.Generator().manual_seed(0)
     lengths = _unit_lengths(SpanUnits()(torch.zeros(64, 512, dtype=torch.long), generator))
-    assert max(lengths) <= 10
-    assert 3.0 < float(np.mean(lengths)) < 4.5
+    assert max(lengths) <= 5
+    assert 2.4 < float(np.mean(lengths)) < 2.8
+    spanbert = _unit_lengths(
+        SpanUnits(max_length=10)(torch.zeros(64, 512, dtype=torch.long), generator)
+    )
+    assert 3.6 < float(np.mean(spanbert)) < 4.0
     assert _unit_lengths(TokenUnits()(torch.zeros(2, 8, dtype=torch.long), generator)) == [1] * 16
 
 

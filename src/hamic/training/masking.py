@@ -73,14 +73,18 @@ class TokenUnits:
 
 
 class SpanUnits:
-    """Geometric span lengths (SpanBERT: ``p = 0.2``, at most 10 tokens, mean ~3.8).
+    """Geometric span lengths, truncated to ``[1, max_length]``.
+
+    SpanBERT uses ``p = 0.2`` and at most 10 tokens (mean ~3.8) for English. HAMIC's
+    default of 5 (mean ~2.6) keeps spans near Vietnamese word length: with 10, about half
+    of the masked tokens would sit in spans of 6-10 tokens (three or four words).
 
     Args:
         p: Success probability of the geometric length distribution.
         max_length: Longest span.
     """
 
-    def __init__(self, p: float = 0.2, max_length: int = 10) -> None:
+    def __init__(self, p: float = 0.2, max_length: int = 5) -> None:
         if not 0 < p <= 1 or max_length < 1:
             raise ValueError("need 0 < p <= 1 and max_length >= 1")
         self.p = p

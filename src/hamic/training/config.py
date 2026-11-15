@@ -44,6 +44,7 @@ _OPTIONAL_IDENTITY_FIELDS = (
     "mask_rate_final",
     "mask_schedule_start",
     "masking",
+    "span_max_length",
     "variant_share",
 )
 
@@ -89,6 +90,7 @@ class PretrainConfig:
             :attr:`mask_rate` to this value, starting at :attr:`mask_schedule_start`
             (share of steps). ``None`` keeps the rate constant.
         mask_schedule_start: Share of steps before the mask rate starts to change.
+        span_max_length: Longest span of ``masking: span`` (geometric, ``p = 0.2``).
         masking: MLM selection unit: ``"token"``, ``"span"`` (geometric spans, SpanBERT)
             or ``"pmi"`` (runs of tokens joined by high-PMI pairs mined from the train
             split, a segmenter-free proxy for Vietnamese multi-syllable words).
@@ -140,6 +142,7 @@ class PretrainConfig:
     mask_rate_final: float | None = None
     mask_schedule_start: float = 0.0
     masking: str = "token"
+    span_max_length: int = 5
     variant_share: float = 0.0
     attention: str = "sdpa"
     sparse_prediction: bool = False
@@ -167,6 +170,8 @@ class PretrainConfig:
             raise ValueError(f"lr_schedule must be one of {LR_SCHEDULES}")
         if not 0 < self.decay_ratio <= 1:
             raise ValueError("decay_ratio must be in (0, 1]")
+        if self.span_max_length < 1:
+            raise ValueError("span_max_length must be >= 1")
         if self.masking not in MASKING_UNITS:
             raise ValueError(f"masking must be one of {MASKING_UNITS}")
         if self.attention not in ATTENTION_BACKENDS:
