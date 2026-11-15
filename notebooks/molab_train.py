@@ -166,14 +166,19 @@ def _(mo, run_configs):
     config_choice = mo.ui.dropdown(options=run_configs, value=default, label="Run configuration")
     mode = mo.ui.radio(
         options={
-            "Throughput test (60 steps, nothing saved)": "bench",
+            "Test run (first steps only, nothing saved)": "bench",
             "Train / resume": "train",
         },
-        value="Throughput test (60 steps, nothing saved)",
+        value="Test run (first steps only, nothing saved)",
         label="Mode",
     )
-    mo.vstack([config_choice, mode])
-    return config_choice, mode
+    # Test runs keep the full-length schedule and stop early, so their first steps match
+    # a real run with the same settings. The overrides below apply to test runs only.
+    test_steps = mo.ui.number(start=10, stop=5000, step=10, value=60, label="Test steps")
+    test_lr = mo.ui.text(value="", label="Test learning rate (empty: from config)")
+    test_warmup = mo.ui.text(value="", label="Test warmup ratio (empty: from config)")
+    mo.vstack([config_choice, mode, mo.hstack([test_steps, test_lr, test_warmup])])
+    return config_choice, mode, test_lr, test_steps, test_warmup
 
 
 @app.cell
@@ -221,7 +226,19 @@ def _(mo):
 
 
 @app.cell
-def _(config, corpus, mode, mo, params, run_store, train_button, work_root):
+def _(
+    config,
+    corpus,
+    mode,
+    mo,
+    params,
+    run_store,
+    test_lr,
+    test_steps,
+    test_warmup,
+    train_button,
+    work_root,
+):
     import dataclasses
     import json as _json
 
@@ -237,16 +254,31 @@ def _(config, corpus, mode, mo, params, run_store, train_button, work_root):
         print(_json.dumps(record), flush=True)
 
     if mode.value == "bench":
+        overrides = {}
+        if test_lr.value.strip():
+            overrides["learning_rate"] = float(test_lr.value)
+        if test_warmup.value.strip():
+            overrides["warmup_ratio"] = float(test_warmup.value)
         run_config = dataclasses.replace(
             config,
             run_id=f"{config.run_id}-bench",
             eval_every_steps=0,
             checkpoint_every_steps=0,
             checkpoint_every_minutes=0,
+            **overrides,
         )
+        print(
+            f"Test run: lr={run_config.learning_rate:g}, "
+            f"warmup={run_config.warmup_steps} steps, stop after {int(test_steps.value)}",
+            flush=True,
+        )
+        import shutil as _shutil
+
+        # Fresh store each time, so a test never resumes from an earlier test.
+        _shutil.rmtree(work_root / "bench-store", ignore_errors=True)
         store = LocalObjectStore(work_root / "bench-store")
         result = Pretrainer(run_config, store, work_root / "bench", log=log).run(
-            stop_after_steps=60
+            stop_after_steps=int(test_steps.value)
         )
     else:
         result = Pretrainer(config, run_store, work_root / "run", log=log).run()
