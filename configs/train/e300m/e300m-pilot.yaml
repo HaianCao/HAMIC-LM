@@ -1,0 +1,41 @@
+# E300M pilot. Same recipe as the E100M pilot (WSD, attention within documents,
+# Wikipedia x2, E6b PMI masking, sparse prediction, FlexAttention); only the model and
+# the learning rate change. 291.8M parameters (268M non-embedding, ~3x E100M compute).
+# lr 6e-4: E100M optimum ~1e-3 at width 640, scaled down for width 1152 (ModernBERT used
+# 8e-4 base / 5e-4 large). Not swept: if the first evals spike or grad_norm keeps rising,
+# drop to 4e-4. 3B tokens on corpus v0.4 (~0.19 epoch); throughput estimated ~90-100K
+# tokens/s (unmeasured) -> ~9 h, one Molab session; resumes if it runs over.
+version: 1
+run_id: e300m-pilot
+model_preset: configs/models/hamic-e300m-m.yaml   # 18 x 1152, 18 heads, 291.8M parameters
+tokenized: data/tokenized/v0.4/t1-bbpe-20544
+objective: mlm
+mask_rate: 0.30
+seq_len: 512
+micro_batch_size: 64
+grad_accum_steps: 8          # 262,144 tokens per optimizer step (same as E100M)
+total_tokens: 3.0e9          # ~11,440 optimizer steps
+learning_rate: 6.0e-4
+warmup_ratio: 0.04           # ~460 steps
+min_lr_ratio: 0.1
+betas: [0.9, 0.98]
+weight_decay: 0.01
+grad_clip: 1.0
+precision: bf16
+seed: 1234
+device: auto
+compile: true                # operational
+sparse_prediction: true      # operational
+attention: flex_attention    # operational
+lr_schedule: wsd             # E1
+decay_ratio: 0.2
+cross_document_attention: false   # E2
+source_weights:              # E3
+  wikipedia-vi-20231101: 2.0
+masking: pmi                 # E6b
+pmi_unit_share: 0.5
+log_every_steps: 10
+eval_every_steps: 500
+eval_sequences: 2048
+eval_mask_rate: 0.15
+checkpoint_every_minutes: 30
