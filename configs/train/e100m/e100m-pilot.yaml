@@ -1,0 +1,38 @@
+# E100M pilot. Recipe from the E-proxy v0.2 round (WSD, attention within documents,
+# Wikipedia x2, E6b PMI masking); learning rate 1e-3 from the sweep (5e-4 -> 1.905,
+# 8e-4 -> 1.816, 1.2e-3 -> 1.793 eval loss on v0.3 at 0.5B tokens; optimum near 1.2e-3,
+# slightly lower for a run 15x longer). 7.5B tokens on corpus v0.4 (~0.47 epoch), about
+# 9 h at ~242K tokens/s: one Molab session.
+version: 1
+run_id: e100m-pilot
+model_preset: configs/models/hamic-e100m-m.yaml   # 18 x 640, 102.8M parameters
+tokenized: data/tokenized/v0.4/t1-bbpe-20544
+objective: mlm
+mask_rate: 0.30
+seq_len: 512
+micro_batch_size: 128
+grad_accum_steps: 4          # 262,144 tokens per optimizer step
+total_tokens: 7.5e9          # ~28,600 optimizer steps
+learning_rate: 1.0e-3
+warmup_ratio: 0.03           # ~860 steps
+min_lr_ratio: 0.1
+betas: [0.9, 0.98]
+weight_decay: 0.01
+grad_clip: 1.0
+precision: bf16
+seed: 1234
+device: auto
+compile: true                # operational
+sparse_prediction: true      # operational: same loss, MLM head on labelled positions only
+lr_schedule: wsd             # E1
+decay_ratio: 0.2
+cross_document_attention: false   # E2
+source_weights:              # E3
+  wikipedia-vi-20231101: 2.0
+masking: pmi                 # E6b: PMI collocations masked whole half of the time
+pmi_unit_share: 0.5
+log_every_steps: 10
+eval_every_steps: 1000
+eval_sequences: 2048
+eval_mask_rate: 0.15
+checkpoint_every_minutes: 30

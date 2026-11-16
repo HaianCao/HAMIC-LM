@@ -296,8 +296,12 @@ class Pretrainer:
             None if cfg.cross_document_attention else DocumentMask(cfg.attention, layer_types)
         )
         # The compiled wrapper shares parameters with ``model``; state is saved from and
-        # evaluation runs on the eager module.
-        train_model = torch.compile(model, dynamic=False) if cfg.compile else model
+        # evaluation runs on the eager module. Sparse prediction selects a different number
+        # of labelled positions in every batch: with static shapes each new count forced a
+        # recompile until Dynamo gave up and ran the MLM head eagerly. Automatic dynamic
+        # shapes compile that part once with a symbolic count (fixed shapes stay static).
+        dynamic = None if cfg.sparse_prediction else False
+        train_model = torch.compile(model, dynamic=dynamic) if cfg.compile else model
         optimizer = self._optimizer(model)
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule(cfg))
         objective = self._objective()
