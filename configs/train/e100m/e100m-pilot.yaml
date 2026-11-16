@@ -24,6 +24,7 @@ seed: 1234
 device: auto
 compile: true                # operational
 sparse_prediction: true      # operational: same loss, MLM head on labelled positions only
+attention: flex_attention    # operational: skips cross-document blocks; 278K vs 250K tok/s
 lr_schedule: wsd             # E1
 decay_ratio: 0.2
 cross_document_attention: false   # E2
