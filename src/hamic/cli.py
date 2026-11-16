@@ -447,6 +447,24 @@ def _parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--workdir", default=".hamic-eval", help="PMI pair cache")
     evaluate.add_argument("--out", help="write results as JSON")
     evaluate.set_defaults(func=_cmd_eval_mlm)
+
+    downstream = sub.add_parser(
+        "downstream", help="fine-tune a published encoder on the Vietnamese task suite"
+    )
+    downstream.add_argument("--store", required=True, help="store holding runs/<run_id>/")
+    downstream.add_argument("--run", required=True, help="run id of the encoder")
+    downstream.add_argument(
+        "--tokenizer", required=True, help="tokenizer.json of the run (e.g. its tokenized dir)"
+    )
+    downstream.add_argument("--tasks", nargs="+", help="task names (default: all nine)")
+    downstream.add_argument("--learning-rates", nargs="+", type=float, default=[2e-5, 5e-5])
+    downstream.add_argument("--seeds", nargs="+", type=int, default=[10, 42, 100])
+    downstream.add_argument("--max-epochs", type=int, default=10)
+    downstream.add_argument("--batch-size", type=int, default=32)
+    downstream.add_argument("--device", default="auto")
+    downstream.add_argument("--workdir", default=".hamic-downstream")
+    downstream.add_argument("--out", help="write results as JSON")
+    downstream.set_defaults(func=_cmd_downstream)
     return parser
 
 
@@ -478,6 +496,50 @@ def _cmd_eval_mlm(args: argparse.Namespace) -> int:
         _print_json({run_id: results[run_id]})
     if args.out:
         Path(args.out).write_text(json.dumps(results, indent=2), encoding="utf-8")
+    return 0
+
+
+def _cmd_downstream(args: argparse.Namespace) -> int:
+    import torch
+
+    from hamic.downstream import (
+        TASKS,
+        FinetuneConfig,
+        build_tokenizer,
+        load_task,
+        run_task,
+        save_for_finetuning,
+    )
+    from hamic.training.evaluate import load_published_model
+
+    device = args.device
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    names = args.tasks or list(TASKS)
+    unknown = sorted(set(names) - set(TASKS))
+    if unknown:
+        raise SystemExit(f"Unknown tasks: {unknown}")
+    workdir = Path(args.workdir)
+    published = load_published_model(_store(args.store), args.run, device="cpu")
+    model_dir = save_for_finetuning(published.model, workdir / "models" / args.run)
+    tokenizer = build_tokenizer(args.tokenizer)
+    cfg = FinetuneConfig(
+        learning_rates=tuple(args.learning_rates),
+        seeds=tuple(args.seeds),
+        max_epochs=args.max_epochs,
+        batch_size=args.batch_size,
+        device=device,
+    )
+    results = {"run": args.run, "step": published.step, "tasks": {}}
+    for name in names:
+        data = load_task(TASKS[name], cache_dir=str(workdir / "datasets"))
+        result = run_task(
+            model_dir, data, tokenizer, cfg, log=lambda line: print(line, flush=True)
+        )
+        results["tasks"][name] = result.to_dict()
+        _print_json({name: {"mean": result.mean, "std": result.std, "metric": result.metric}})
+        if args.out:
+            Path(args.out).write_text(json.dumps(results, indent=2), encoding="utf-8")
     return 0
 
 
