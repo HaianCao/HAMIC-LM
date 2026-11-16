@@ -111,6 +111,18 @@ class JsonlSource:
             yield from read_jsonl(path)
 
 
+def _is_transient(error: BaseException) -> bool:
+    """Network failures worth retrying (not missing files, auth or programming errors)."""
+    from huggingface_hub.errors import HfHubHTTPError
+
+    if isinstance(error, HfHubHTTPError):
+        status = getattr(error.response, "status_code", None)
+        return status is None or status == 429 or status >= 500
+    if isinstance(error, (ConnectionError, TimeoutError)):
+        return True
+    return type(error).__module__.split(".")[0] in {"httpx", "httpcore", "requests", "urllib3"}
+
+
 @dataclass
 class HuggingFaceStreamSource:
     """Stream documents from a Hugging Face dataset without downloading it whole.
@@ -128,6 +140,11 @@ class HuggingFaceStreamSource:
         data_files: Repository paths of the files to read, in this order (e.g. a seeded
             selection of FineWeb-2 parquet files for a corpus delta). ``None`` reads the
             whole ``config``.
+        download_dir: With ``data_files``: download the files here first (partial files
+            resume, failures are retried until the network is back), then read them
+            locally. Only the download needs the network, so a long build survives the
+            machine sleeping or moving between networks. The result is identical to
+            streaming the same files.
     """
 
     source_id: str
@@ -140,11 +157,45 @@ class HuggingFaceStreamSource:
     meta_fields: tuple[str, ...] = ("url", "title")
     limit: int | None = None
     data_files: tuple[str, ...] | None = None
+    download_dir: str | None = None
+
+    def download(self, attempts: int = 10_000, wait_seconds: float = 30.0) -> list[Path]:
+        """Download ``data_files`` into ``download_dir`` in order; retry until done."""
+        import time
+
+        from huggingface_hub import hf_hub_download
+
+        if not self.data_files or not self.download_dir:
+            raise ValueError("download needs data_files and download_dir")
+        paths = []
+        for name in self.data_files:
+            for attempt in range(1, attempts + 1):
+                try:
+                    local = hf_hub_download(
+                        self.dataset,
+                        name,
+                        repo_type="dataset",
+                        revision=self.revision,
+                        local_dir=self.download_dir,
+                    )
+                    break
+                except Exception as error:
+                    if attempt == attempts or not _is_transient(error):
+                        raise
+                    print(f"download {name}: {error!r}; retry {attempt} in {wait_seconds:.0f}s")
+                    time.sleep(wait_seconds)
+            paths.append(Path(local))
+        return paths
 
     def __iter__(self) -> Iterator[Document]:
         from datasets import load_dataset
 
-        if self.data_files:
+        if self.data_files and self.download_dir:
+            local = [str(path) for path in self.download()]
+            stream = load_dataset(
+                "parquet", data_files={self.split: local}, split=self.split, streaming=True
+            )
+        elif self.data_files:
             # Read the listed parquet files directly, pinned to the revision and in order;
             # the repository's own configs cannot be combined with ``data_files``.
             urls = [

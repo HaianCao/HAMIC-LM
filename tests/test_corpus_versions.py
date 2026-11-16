@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import os
 from contextlib import nullcontext
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -252,3 +253,70 @@ def test_publish_rejects_missing_files_without_a_remote_map(versions):
     next(out.glob("train/*.tokens.npy")).unlink()
     with pytest.raises(FileNotFoundError, match="not listed as published"):
         publish_tokenized(out, LocalObjectStore(versions / "store"), "tokenized/v2")
+
+
+def test_stream_source_downloads_first_and_retries(tmp_path, monkeypatch):
+    import huggingface_hub
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from hamic.data import HuggingFaceStreamSource
+
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    names = ["data/a.parquet", "data/b.parquet"]
+    for i, name in enumerate(names):
+        (remote / name).parent.mkdir(parents=True, exist_ok=True)
+        rows = {
+            "id": [f"{i}-{j}" for j in range(3)],
+            "text": [f"văn bản {i}-{j}" for j in range(3)],
+        }
+        pq.write_table(pa.table(rows), remote / name)
+    failures = {"left": 2}
+
+    def fake_download(repo_id, filename, repo_type, revision, local_dir):
+        assert (repo_id, repo_type, revision) == ("org/ds", "dataset", "abc")
+        if failures["left"]:
+            failures["left"] -= 1
+            raise ConnectionError("network down")
+        target = Path(local_dir) / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((remote / filename).read_bytes())
+        return str(target)
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+    source = HuggingFaceStreamSource(
+        source_id="web",
+        dataset="org/ds",
+        config=None,
+        revision="abc",
+        meta_fields=(),
+        data_files=tuple(names),
+        download_dir=str(tmp_path / "raw"),
+    )
+    monkeypatch.setattr("time.sleep", lambda _: None)
+    documents = list(source)
+    assert [d.doc_id for d in documents] == [f"web:{i}-{j}" for i in range(2) for j in range(3)]
+    assert documents[0].text == "văn bản 0-0"
+    assert failures["left"] == 0
+    assert (tmp_path / "raw" / "data" / "b.parquet").is_file()
+
+
+def test_download_does_not_retry_programming_errors(tmp_path, monkeypatch):
+    import huggingface_hub
+
+    from hamic.data import HuggingFaceStreamSource
+
+    calls = []
+
+    def broken(*args, **kwargs):
+        calls.append(1)
+        raise ValueError("bad argument")
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", broken)
+    source = HuggingFaceStreamSource(
+        "web", "org/ds", None, "abc", data_files=("x.parquet",), download_dir=str(tmp_path)
+    )
+    with pytest.raises(ValueError, match="bad argument"):
+        source.download(wait_seconds=0)
+    assert len(calls) == 1
