@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from hamic.data.config import PipelineConfig
+from hamic.data.dedup_index import DedupIndex
 from hamic.data.documents import Document, DocumentSource
 from hamic.data.parallel import ParallelPrefix, split_parallel_prefix
 from hamic.data.registry import SourceRegistry, UseCase
@@ -92,6 +93,10 @@ class CorpusPipeline:
         workers: Processes for the stateless stages and MinHash signatures; ``1`` runs
             everything in this process. The output is identical either way.
         config: Pipeline configuration; defaults to :class:`PipelineConfig` defaults.
+        dedup_index: Persistent index of earlier corpus versions; the build then writes a
+            delta (documents new relative to every indexed version) and adds the kept
+            documents to the index. The caller saves the index after a successful run.
+        base_corpus: Previous version this delta extends (recorded in the manifest).
     """
 
     def __init__(
@@ -102,6 +107,8 @@ class CorpusPipeline:
         shard_docs: int | None = None,
         workers: int = 1,
         config: PipelineConfig | None = None,
+        dedup_index: DedupIndex | None = None,
+        base_corpus: dict[str, Any] | None = None,
     ) -> None:
         if stages is not None and config is not None:
             raise ValueError("Pass either custom stages or a config, not both")
@@ -113,13 +120,15 @@ class CorpusPipeline:
             self.config = config or PipelineConfig()
             if shard_docs is not None:
                 self.config = replace(self.config, shard_docs=shard_docs)
-            self.stages = self.config.build_stages()
+            self.stages = self.config.build_stages(dedup_index)
         if not self.stages or not isinstance(self.stages[-1], SplitStage):
             raise ValueError("The last stage must be a SplitStage")
         self.registry = registry
         self.use = use
         self.shard_docs = shard_docs or (self.config.shard_docs if self.config else 50_000)
         self.workers = max(1, workers)
+        self.dedup_index = dedup_index
+        self.base_corpus = base_corpus
 
     def _stream(self, documents: Iterable[Document]) -> Iterable[Document]:
         stream = documents
@@ -176,6 +185,12 @@ class CorpusPipeline:
                 for r in records
             ],
             "stages": [{"name": s.name, **s.stats.to_dict()} for s in self.stages],
+            "base_corpus": self.base_corpus,
+            "dedup_index": (
+                {"versions": list(self.dedup_index.versions), **self.dedup_index.settings()}
+                if self.dedup_index is not None
+                else None
+            ),
             "splits": {
                 name: {
                     "documents": w.documents,

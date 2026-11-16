@@ -31,8 +31,17 @@ class RemoteFileInfo:
 class ObjectStore(Protocol):
     """Minimal object-store operations used by checkpoint publishing and resolution."""
 
-    def put_files(self, files: Mapping[str, Path], message: str) -> None:
-        """Upload ``{remote_path: local_file}`` as one atomic batch where possible."""
+    def put_files(
+        self,
+        files: Mapping[str, Path],
+        message: str,
+        copies: Mapping[str, str] | None = None,
+    ) -> None:
+        """Upload ``{remote_path: local_file}`` as one atomic batch where possible.
+
+        ``copies`` maps new remote paths to existing remote paths copied inside the store
+        (no upload) in the same batch.
+        """
         ...
 
     def put_bytes(self, remote_path: str, data: bytes, message: str) -> None:
@@ -73,9 +82,18 @@ class LocalObjectStore:
             raise ValueError(f"Path escapes store root: {remote_path}")
         return target
 
-    def put_files(self, files: Mapping[str, Path], message: str) -> None:
-        """Copy files into the store."""
+    def put_files(
+        self,
+        files: Mapping[str, Path],
+        message: str,
+        copies: Mapping[str, str] | None = None,
+    ) -> None:
+        """Copy files into the store; ``copies`` duplicate existing store objects."""
         del message
+        for remote, existing in (copies or {}).items():
+            target = self._path(remote)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(self._path(existing), target)
         for remote, local in files.items():
             target = self._path(remote)
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -166,11 +184,20 @@ class HuggingFaceObjectStore:
         """Return the account name the token belongs to (verifies the token works)."""
         return str(self._api.whoami()["name"])
 
-    def put_files(self, files: Mapping[str, Path], message: str) -> None:
-        """Upload files in a single commit."""
-        from huggingface_hub import CommitOperationAdd
+    def put_files(
+        self,
+        files: Mapping[str, Path],
+        message: str,
+        copies: Mapping[str, str] | None = None,
+    ) -> None:
+        """Upload files in a single commit; ``copies`` are server-side copies (no upload)."""
+        from huggingface_hub import CommitOperationAdd, CommitOperationCopy
 
-        operations = [
+        operations: list[Any] = [
+            CommitOperationCopy(src_path_in_repo=existing, path_in_repo=remote)
+            for remote, existing in (copies or {}).items()
+        ]
+        operations += [
             CommitOperationAdd(path_in_repo=remote, path_or_fileobj=str(local))
             for remote, local in files.items()
         ]

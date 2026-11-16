@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import warnings
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +47,9 @@ MANIFEST_NAME = "tokenized_manifest.json"
 SOURCE_MANIFEST = "manifest.json"
 SPLITS = ("train", "validation", "test")
 TOKENIZER_NAME = "tokenizer.json"
+# Written by ``assemble_tokenized`` on a published base: local path -> published path of
+# every file that is not stored locally. Never uploaded.
+REMOTE_FILES_NAME = "remote_files.json"
 
 
 def _dtype_for(vocab_size: int) -> np.dtype[Any]:
@@ -377,28 +381,103 @@ class TokenizedCorpus:
                 yield shard.document(index)
 
 
-def publish_tokenized(directory: str | Path, store: ObjectStore, prefix: str) -> int:
+def publish_tokenized(
+    directory: str | Path, store: ObjectStore, prefix: str, copy_from: str | None = None
+) -> int:
     """Upload a tokenized directory to ``store`` under ``prefix``.
 
     Shards and the tokenizer copy go in one commit; the manifest follows in a second one,
     so a reader that finds the manifest also finds every file it lists.
 
+    Args:
+        directory: Tokenized directory to publish. It may hold only part of its files
+            when ``remote_files.json`` (written by ``assemble_tokenized`` on a published
+            base) lists where the others are already published; those are copied on the
+            server.
+        store: Target store.
+        prefix: Remote folder, e.g. ``tokenized/v0.3/t1-bbpe-20544``.
+        copy_from: Remote folder of an already published version. Files whose checksum
+            matches one there are copied inside the store instead of uploaded, so a new
+            complete version only uploads its delta. When the store rejects the copies of
+            files that exist locally, those are uploaded instead.
+
     Returns:
-        Number of files uploaded.
+        Number of files written under ``prefix``.
     """
-    corpus = TokenizedCorpus(directory, verify=True)
-    root = corpus.directory
+    root = Path(directory)
+    manifest = json.loads((root / MANIFEST_NAME).read_text(encoding="utf-8"))
+    remote_path = root / REMOTE_FILES_NAME
+    remote: dict[str, str] = (
+        json.loads(remote_path.read_text(encoding="utf-8")) if remote_path.is_file() else {}
+    )
+    _verify_local_files(root, manifest, remote)
+    skip = {MANIFEST_NAME, REMOTE_FILES_NAME}
     payload = {
         f"{prefix}/{path.relative_to(root).as_posix()}": path
         for path in sorted(root.rglob("*"))
-        if path.is_file() and path.name != MANIFEST_NAME
+        if path.is_file() and path.name not in skip and not path.name.endswith(".tmp")
     }
-    store.put_files(payload, message=f"tokenized shards {prefix}")
+    required = {f"{prefix}/{local}": published for local, published in remote.items()}
+    optional = (
+        _published_copies(TokenizedCorpus(root), store, prefix, copy_from) if copy_from else {}
+    )
+    optional = {k: v for k, v in optional.items() if k in payload and k not in required}
+    copies = {**required, **optional}
+    uploads = {
+        remote_name: local for remote_name, local in payload.items() if remote_name not in copies
+    }
+    message = f"tokenized shards {prefix}"
+    try:
+        store.put_files(uploads, message=message, copies=copies)
+    except Exception as error:
+        if required or not copies:
+            raise
+        warnings.warn(f"Server-side copy failed ({error}); uploading every file", stacklevel=2)
+        store.put_files(payload, message=message)
     store.put_files(
         {f"{prefix}/{MANIFEST_NAME}": root / MANIFEST_NAME},
         message=f"tokenized manifest {prefix}",
     )
-    return len(payload) + 1
+    return len(payload) + len(required) + 1
+
+
+def _verify_local_files(root: Path, manifest: dict[str, Any], remote: dict[str, str]) -> None:
+    """Check every listed file that is stored locally; the rest must be in ``remote``."""
+    for split, info in manifest["splits"].items():
+        for shard in info["shards"]:
+            for entry in shard["files"].values():
+                relative = f"{split}/{entry['path']}"
+                if relative in remote:
+                    continue
+                path = root / relative
+                if not path.is_file():
+                    raise FileNotFoundError(f"{path} is missing and not listed as published")
+                if file_sha256(path) != entry["sha256"]:
+                    raise ValueError(f"Checksum mismatch: {path}")
+
+
+def _published_copies(
+    corpus: TokenizedCorpus, store: ObjectStore, prefix: str, copy_from: str
+) -> dict[str, str]:
+    """Map files of ``corpus`` to identical files already published under ``copy_from``."""
+    raw = store.read_bytes(f"{copy_from}/{MANIFEST_NAME}")
+    if raw is None:
+        raise FileNotFoundError(f"No tokenized manifest under {copy_from!r}")
+    published = json.loads(raw.decode("utf-8"))
+    by_sha: dict[str, str] = {}
+    for split, info in published["splits"].items():
+        for shard in info["shards"]:
+            for entry in shard["files"].values():
+                by_sha[entry["sha256"]] = f"{copy_from}/{split}/{entry['path']}"
+    copies: dict[str, str] = {}
+    for split, info in corpus.manifest["splits"].items():
+        for shard in info["shards"]:
+            for entry in shard["files"].values():
+                if entry["sha256"] in by_sha:
+                    copies[f"{prefix}/{split}/{entry['path']}"] = by_sha[entry["sha256"]]
+    if published["tokenizer"]["sha256"] == corpus.manifest["tokenizer"]["sha256"]:
+        copies[f"{prefix}/{TOKENIZER_NAME}"] = f"{copy_from}/{TOKENIZER_NAME}"
+    return copies
 
 
 def fetch_tokenized(store: ObjectStore, prefix: str, destination: str | Path) -> TokenizedCorpus:

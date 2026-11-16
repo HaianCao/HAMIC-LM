@@ -1,0 +1,103 @@
+# Seeded order of FineWeb-2 vie_Latn parquet files for corpus deltas (generated).
+dataset: HuggingFaceFW/fineweb-2
+revision: af9c13333eb981300149d5ca60a8e9d659b276b9
+seed: hamic-fineweb2-vie-order-v1
+note: Files are ordered by crawl time, so deltas read them in this seeded random order.
+  v0.2 streamed the first 3.5M rows in name order; fully read files are excluded,
+  and rows of the partly read file that v0.2 kept are removed again by the dedup index.
+consumed_by_v0.2:
+- data/vie_Latn/train/000_00000.parquet
+partly_consumed_by_v0.2:
+  file: data/vie_Latn/train/000_00001.parquet
+  rows: 1181000
+rows:
+  data/vie_Latn/train/000_00000.parquet: 2319000
+  data/vie_Latn/train/000_00001.parquet: 2322000
+  data/vie_Latn/train/000_00002.parquet: 2321000
+  data/vie_Latn/train/000_00003.parquet: 2327000
+  data/vie_Latn/train/000_00004.parquet: 2333000
+  data/vie_Latn/train/000_00005.parquet: 2335000
+  data/vie_Latn/train/001_00000.parquet: 2329000
+  data/vie_Latn/train/001_00001.parquet: 2327000
+  data/vie_Latn/train/001_00002.parquet: 2328000
+  data/vie_Latn/train/001_00003.parquet: 2328000
+  data/vie_Latn/train/001_00004.parquet: 2321000
+  data/vie_Latn/train/001_00005.parquet: 2332000
+  data/vie_Latn/train/002_00000.parquet: 2289000
+  data/vie_Latn/train/002_00001.parquet: 2281000
+  data/vie_Latn/train/002_00002.parquet: 2282000
+  data/vie_Latn/train/002_00003.parquet: 2282000
+  data/vie_Latn/train/002_00004.parquet: 2287000
+  data/vie_Latn/train/002_00005.parquet: 2278000
+  data/vie_Latn/train/003_00000.parquet: 2215000
+  data/vie_Latn/train/003_00001.parquet: 2216000
+  data/vie_Latn/train/003_00002.parquet: 2214000
+  data/vie_Latn/train/003_00003.parquet: 2210000
+  data/vie_Latn/train/003_00004.parquet: 2211000
+  data/vie_Latn/train/003_00005.parquet: 2206000
+  data/vie_Latn/train/004_00000.parquet: 1137533
+  data/vie_Latn/train/004_00001.parquet: 1096113
+  data/vie_Latn/train/004_00002.parquet: 1064029
+  data/vie_Latn/train/004_00003.parquet: 1019200
+  data/vie_Latn/train/004_00004.parquet: 946911
+  data/vie_Latn/train/004_00005.parquet: 907462
+versions:
+  v0.3:
+    files:
+    - data/vie_Latn/train/000_00002.parquet
+    - data/vie_Latn/train/004_00005.parquet
+    - data/vie_Latn/train/004_00002.parquet
+    rows: 4292491
+  v0.4:
+    files:
+    - data/vie_Latn/train/002_00001.parquet
+    - data/vie_Latn/train/003_00000.parquet
+    - data/vie_Latn/train/001_00003.parquet
+    rows: 6824000
+  v0.5:
+    files:
+    - data/vie_Latn/train/001_00002.parquet
+    - data/vie_Latn/train/002_00003.parquet
+    - data/vie_Latn/train/000_00005.parquet
+    rows: 6945000
+  v0.6:
+    files:
+    - data/vie_Latn/train/004_00001.parquet
+    - data/vie_Latn/train/001_00001.parquet
+    - data/vie_Latn/train/003_00002.parquet
+    rows: 5637113
+  v0.7:
+    files:
+    - data/vie_Latn/train/000_00003.parquet
+    - data/vie_Latn/train/004_00004.parquet
+    - data/vie_Latn/train/001_00000.parquet
+    rows: 5602911
+  v0.8:
+    files:
+    - data/vie_Latn/train/002_00005.parquet
+    - data/vie_Latn/train/003_00004.parquet
+    - data/vie_Latn/train/004_00003.parquet
+    rows: 5508200
+  v0.9:
+    files:
+    - data/vie_Latn/train/001_00005.parquet
+    - data/vie_Latn/train/004_00000.parquet
+    - data/vie_Latn/train/001_00004.parquet
+    rows: 5790533
+  v0.10:
+    files:
+    - data/vie_Latn/train/003_00003.parquet
+    - data/vie_Latn/train/000_00004.parquet
+    - data/vie_Latn/train/003_00001.parquet
+    rows: 6759000
+  v0.11:
+    files:
+    - data/vie_Latn/train/002_00004.parquet
+    - data/vie_Latn/train/002_00002.parquet
+    - data/vie_Latn/train/002_00000.parquet
+    rows: 6858000
+  v0.12:
+    files:
+    - data/vie_Latn/train/003_00005.parquet
+    - data/vie_Latn/train/000_00001.parquet
+    rows: 4528000

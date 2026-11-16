@@ -1,6 +1,8 @@
 """Corpus governance and cleaning."""
 
 from hamic.data.config import NearDedupConfig, PipelineConfig
+from hamic.data.dedup_index import DedupIndex
+from hamic.data.delta import assemble_tokenized, index_corpus, shuffled_files
 from hamic.data.documents import (
     Document,
     DocumentSource,
@@ -41,6 +43,7 @@ from hamic.data.tokenized import (
 __all__ = [
     "ContaminationFilterStage",
     "CorpusPipeline",
+    "DedupIndex",
     "Document",
     "DocumentSource",
     "ExactDedupStage",
@@ -65,10 +68,13 @@ __all__ = [
     "TokenizedShard",
     "UseCase",
     "annotate_sources",
+    "assemble_tokenized",
     "default_stages",
     "fetch_tokenized",
+    "index_corpus",
     "publish_tokenized",
     "read_jsonl",
+    "shuffled_files",
     "tokenize_corpus",
     "write_jsonl",
 ]

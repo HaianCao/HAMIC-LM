@@ -16,14 +16,19 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hamic.data.documents import Document
 from hamic.text.normalization import VietnameseNormalizer
 
+if TYPE_CHECKING:
+    from hamic.data.dedup_index import DedupIndex
+
 __all__ = [
     "ContaminationFilterStage",
     "ExactDedupStage",
+    "IndexedExactDedupStage",
+    "IndexedNearDedupStage",
     "NearDedupStage",
     "NormalizeStage",
     "PiiFilterStage",
@@ -379,6 +384,53 @@ class NearDedupStage(Stage):
         if self._lsh.query(signature):
             return "near_duplicate"
         self._lsh.insert(document.doc_id, signature)
+        return document.with_meta(cluster_id=document.doc_id)
+
+
+class IndexedExactDedupStage(ExactDedupStage):
+    """Exact deduplication against a persistent index of earlier corpus versions.
+
+    Documents already in ``index`` or seen earlier in this build are dropped; kept
+    documents are added to the index (by :class:`IndexedNearDedupStage`, which follows).
+    """
+
+    def __init__(self, index: DedupIndex, **kwargs: int) -> None:
+        super().__init__(**kwargs)
+        self.index = index
+
+    def process(self, document: Document) -> Document | str:
+        """Reject texts indexed by an earlier version or seen in this build."""
+        if self.index.has_exact(document.text_sha256):
+            return "exact_duplicate"
+        return super().process(document)
+
+
+class IndexedNearDedupStage(NearDedupStage):
+    """Near-duplicate removal against a persistent index of earlier corpus versions.
+
+    Same semantics as :class:`NearDedupStage` (any shared LSH band is a duplicate), but
+    the bands live in a compact :class:`~hamic.data.dedup_index.DedupIndex` that also
+    holds every earlier version. Kept documents are added to the index.
+    """
+
+    def __init__(self, index: DedupIndex, **kwargs: int) -> None:
+        Stage.__init__(self, **kwargs)
+        self.index = index
+        self.threshold = 0.0  # implied by the banding of the index
+        self.num_perm = index.num_perm
+        self.shingle_size = index.shingle_size
+        self.precomputed = {}
+
+    def process(self, document: Document) -> Document | str:
+        """Keep the document unless a band matches an indexed document."""
+        cached = self.precomputed.pop(document.doc_id, None)
+        if cached is not None and cached[0] == len(document.text):
+            values = cached[1]
+        else:
+            values = minhash_signature(document.text, self.num_perm, self.shingle_size)
+        if self.index.has_near(values):
+            return "near_duplicate"
+        self.index.add(document.text_sha256, values)
         return document.with_meta(cluster_id=document.doc_id)
 
 

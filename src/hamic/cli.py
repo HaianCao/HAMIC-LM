@@ -60,6 +60,8 @@ def _build_source(item: dict[str, Any]) -> Any:
     kind = item.pop("type")
     if kind == "huggingface":
         item["meta_fields"] = tuple(item.get("meta_fields", ("url", "title")))
+        if item.get("data_files"):
+            item["data_files"] = tuple(item["data_files"])
         return HuggingFaceStreamSource(**item)
     if kind == "jsonl":
         return JsonlSource(source_id=item["source_id"], paths=_expand(item["paths"]))
@@ -67,16 +69,75 @@ def _build_source(item: dict[str, Any]) -> Any:
 
 
 def _cmd_corpus_build(args: argparse.Namespace) -> int:
-    from hamic.data import CorpusPipeline, PipelineConfig, SourceRegistry
+    from hamic.data import CorpusPipeline, DedupIndex, PipelineConfig, SourceRegistry
+    from hamic.provenance import file_sha256
 
     with Path(args.sources).open(encoding="utf-8") as stream:
         source_items = yaml.safe_load(stream)["sources"]
     registry = SourceRegistry.from_yaml(args.registry)
     config = PipelineConfig.from_yaml(args.config) if args.config else None
-    result = CorpusPipeline(registry, workers=args.workers, config=config).run(
+    index = DedupIndex.load(args.dedup_index) if args.dedup_index else None
+    base = None
+    if args.base:
+        if index is None:
+            raise SystemExit("--base needs --dedup-index (the delta is deduplicated against it)")
+        base_manifest = Path(args.base) / "manifest.json"
+        base = {
+            "corpus_version": json.loads(base_manifest.read_text(encoding="utf-8"))[
+                "corpus_version"
+            ],
+            "manifest_sha256": file_sha256(base_manifest),
+        }
+        if base["corpus_version"] not in index.versions:
+            raise SystemExit(f"The dedup index does not include {base['corpus_version']}")
+    pipeline = CorpusPipeline(
+        registry, workers=args.workers, config=config, dedup_index=index, base_corpus=base
+    )
+    result = pipeline.run(
         [_build_source(dict(item)) for item in source_items], args.out, args.version
     )
+    if index is not None:
+        index.save(args.dedup_index, version=args.version)
     _print_json({"output": str(result.output_dir), "documents": result.counts})
+    return 0
+
+
+def _cmd_corpus_index(args: argparse.Namespace) -> int:
+    from hamic.data import DedupIndex, index_corpus
+
+    target = Path(args.out)
+    index = DedupIndex.load(target) if (target / "dedup_index.json").is_file() else DedupIndex()
+    if args.version in index.versions:
+        raise SystemExit(f"{args.version} is already in the index")
+    added = index_corpus(args.corpus, index, args.version, workers=args.workers)
+    manifest = index.save(target)
+    _print_json({"added": added, **manifest})
+    return 0
+
+
+def _cmd_corpus_assemble(args: argparse.Namespace) -> int:
+    from hamic.data import assemble_tokenized
+
+    if bool(args.base) == bool(args.base_remote):
+        raise SystemExit("Pass exactly one of --base (local) or --base-remote (published)")
+    if args.base_remote:
+        if not args.store:
+            raise SystemExit("--base-remote needs --store")
+        raw = _store(args.store).read_bytes(f"{args.base_remote}/tokenized_manifest.json")
+        if raw is None:
+            raise SystemExit(f"No tokenized manifest under {args.base_remote!r}")
+        manifest = assemble_tokenized(
+            None,
+            args.delta,
+            args.out,
+            args.version,
+            base_manifest=json.loads(raw.decode("utf-8")),
+            base_prefix=args.base_remote,
+        )
+    else:
+        manifest = assemble_tokenized(args.base, args.delta, args.out, args.version)
+    splits = manifest["splits"]
+    _print_json({"output": args.out, "tokens": {k: v["tokens"] for k, v in splits.items()}})
     return 0
 
 
@@ -108,7 +169,7 @@ def _cmd_corpus_push(args: argparse.Namespace) -> int:
     from hamic.data import publish_tokenized
 
     prefix = args.prefix or _default_prefix(args.tokenized)
-    count = publish_tokenized(args.tokenized, _store(args.store), prefix)
+    count = publish_tokenized(args.tokenized, _store(args.store), prefix, args.copy_from)
     _print_json({"prefix": prefix, "files": count})
     return 0
 
@@ -265,6 +326,12 @@ def _parser() -> argparse.ArgumentParser:
         default=max(1, (os.cpu_count() or 2) - 2),
         help="worker processes for normalize/PII/quality/MinHash (1 = serial)",
     )
+    build.add_argument(
+        "--dedup-index",
+        help="persistent dedup index of earlier versions; the build writes a delta and "
+        "extends the index",
+    )
+    build.add_argument("--base", help="previous corpus version this delta extends")
     build.set_defaults(func=_cmd_corpus_build)
 
     tokenize = corpus.add_parser("tokenize", help="write memory-mappable token shards")
@@ -280,7 +347,34 @@ def _parser() -> argparse.ArgumentParser:
     push.add_argument("--tokenized", required=True, help="tokenized directory")
     push.add_argument("--store", required=True, help=store_help)
     push.add_argument("--prefix", help=prefix_help)
+    push.add_argument(
+        "--copy-from",
+        help="published folder of the previous version; identical files are copied on the "
+        "server instead of uploaded",
+    )
     push.set_defaults(func=_cmd_corpus_push)
+
+    index = corpus.add_parser("index", help="add a frozen corpus to a persistent dedup index")
+    index.add_argument("--corpus", required=True, help="frozen corpus directory")
+    index.add_argument("--version", required=True, help="corpus version recorded in the index")
+    index.add_argument("--out", required=True, help="index directory (created or extended)")
+    index.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
+    index.set_defaults(func=_cmd_corpus_index)
+
+    assemble = corpus.add_parser(
+        "assemble", help="hard-link a complete tokenized version from base + delta"
+    )
+    assemble.add_argument("--base", help="previous complete tokenized version (local)")
+    assemble.add_argument(
+        "--base-remote",
+        help="published folder of the previous version, e.g. tokenized/v0.4/t1-bbpe-20544; "
+        "only the delta is written locally",
+    )
+    assemble.add_argument("--store", help=f"store of --base-remote ({store_help})")
+    assemble.add_argument("--delta", required=True, help="tokenized delta")
+    assemble.add_argument("--out", required=True, help="complete version to write")
+    assemble.add_argument("--version", required=True, help="corpus version, e.g. v0.3")
+    assemble.set_defaults(func=_cmd_corpus_assemble)
 
     pull = corpus.add_parser("pull", help="download and verify tokenized shards")
     pull.add_argument("--store", required=True, help=store_help)

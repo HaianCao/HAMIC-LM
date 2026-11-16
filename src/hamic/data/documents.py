@@ -125,6 +125,9 @@ class HuggingFaceStreamSource:
         id_field: Column holding a stable id; a content hash is used when absent.
         meta_fields: Columns copied into ``Document.meta``.
         limit: Stop after this many documents (``None`` streams everything).
+        data_files: Repository paths of the files to read, in this order (e.g. a seeded
+            selection of FineWeb-2 parquet files for a corpus delta). ``None`` reads the
+            whole ``config``.
     """
 
     source_id: str
@@ -136,17 +139,28 @@ class HuggingFaceStreamSource:
     id_field: str | None = "id"
     meta_fields: tuple[str, ...] = ("url", "title")
     limit: int | None = None
+    data_files: tuple[str, ...] | None = None
 
     def __iter__(self) -> Iterator[Document]:
         from datasets import load_dataset
 
-        stream = load_dataset(
-            self.dataset,
-            self.config,
-            split=self.split,
-            revision=self.revision,
-            streaming=True,
-        )
+        if self.data_files:
+            # Read the listed parquet files directly, pinned to the revision and in order;
+            # the repository's own configs cannot be combined with ``data_files``.
+            urls = [
+                f"hf://datasets/{self.dataset}@{self.revision}/{path}" for path in self.data_files
+            ]
+            stream = load_dataset(
+                "parquet", data_files={self.split: urls}, split=self.split, streaming=True
+            )
+        else:
+            stream = load_dataset(
+                self.dataset,
+                self.config,
+                split=self.split,
+                revision=self.revision,
+                streaming=True,
+            )
         for index, row in enumerate(stream):
             if self.limit is not None and index >= self.limit:
                 break
