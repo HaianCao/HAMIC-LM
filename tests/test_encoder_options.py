@@ -333,3 +333,24 @@ def test_modernbert_trains_with_every_option(tmp_path, tokenized, masking):  # n
     assert set(result.evaluations) == {4, 8}
     if masking == "pmi":
         assert list((tmp_path / "work").glob("pmi-pairs-*.npy"))
+
+
+def test_offline_evaluation_of_a_published_run(tmp_path, tokenized):  # noqa: F811
+    from hamic.training.evaluate import evaluate_views, load_published_model, masking_views
+
+    config = _config(
+        tmp_path, tokenized, architecture="modernbert", mask_rate=0.3, eval_mask_rate=0.15
+    )
+    store = LocalObjectStore(tmp_path / "store")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        Pretrainer(config, store, tmp_path / "work", log=lambda r: None).run()
+    published = load_published_model(store, config.run_id)
+    assert published.step == config.total_steps
+    corpus = TokenizedCorpus(tokenized)
+    views = masking_views(corpus, published.preset, pmi_tokens=10_000, cache_dir=tmp_path / "c")
+    first = evaluate_views(published, corpus, views, sequences=4, batch_size=2)
+    again = evaluate_views(published, corpus, views, sequences=4, batch_size=2)
+    assert set(first) == {"token", "span", "pmi"}
+    assert first == again  # same seeded masks, same inputs
+    assert all(np.isfinite(v) and v > 0 for v in first.values())

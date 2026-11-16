@@ -429,7 +429,56 @@ def _parser() -> argparse.ArgumentParser:
     drill.add_argument("--steps", type=int, default=12)
     drill.add_argument("--stop-after", type=int)
     drill.set_defaults(func=_cmd_drill)
+
+    evaluate = sub.add_parser(
+        "eval-mlm",
+        help="score published MLM checkpoints under token, span and PMI masking views",
+    )
+    evaluate.add_argument("--store", required=True, help="store holding runs/<run_id>/")
+    evaluate.add_argument("--runs", nargs="+", required=True, help="run ids to score")
+    evaluate.add_argument(
+        "--tokenized", help="validation shards (default: the first run's tokenized directory)"
+    )
+    evaluate.add_argument("--views", nargs="+", default=["token", "span", "pmi"])
+    evaluate.add_argument("--rate", type=float, default=0.15, help="mask rate of every view")
+    evaluate.add_argument("--sequences", type=int, default=512, help="validation rows")
+    evaluate.add_argument("--batch-size", type=int, default=16)
+    evaluate.add_argument("--device", default="auto")
+    evaluate.add_argument("--workdir", default=".hamic-eval", help="PMI pair cache")
+    evaluate.add_argument("--out", help="write results as JSON")
+    evaluate.set_defaults(func=_cmd_eval_mlm)
     return parser
+
+
+def _cmd_eval_mlm(args: argparse.Namespace) -> int:
+    import torch
+
+    from hamic.data import TokenizedCorpus
+    from hamic.training.evaluate import evaluate_views, load_published_model, masking_views
+
+    device = args.device
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    store = _store(args.store)
+    results: dict[str, Any] = {}
+    corpus = None
+    views = None
+    for run_id in args.runs:
+        published = load_published_model(store, run_id, device=device)
+        if corpus is None:
+            corpus = TokenizedCorpus(args.tokenized or published.config.tokenized)
+            views = masking_views(
+                corpus, published.preset, rate=args.rate, cache_dir=args.workdir, views=args.views
+            )
+        assert views is not None
+        losses = evaluate_views(
+            published, corpus, views, args.sequences, args.batch_size, device=device
+        )
+        results[run_id] = {"step": published.step, **losses}
+        _print_json({run_id: results[run_id]})
+    if args.out:
+        Path(args.out).write_text(json.dumps(results, indent=2), encoding="utf-8")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
