@@ -1,0 +1,38 @@
+# E-proxy v0.2 round, follow-up: final recipe (E1+E2+E3) + E6b, PMI units kept half the
+# time. Pure PMI masking (E6) won the PMI-unit eval view (3.15 vs 3.65 base) but lost the
+# token (+1.33) and span (+0.56) views: collocations were never split, so the model never
+# predicted part of a word with the rest visible. Splitting each occurrence with
+# probability 0.5 should keep word-level practice without that blind spot.
+version: 1
+run_id: e-v02-final-e6b
+model_preset: configs/models/proxy/e-proxy-m-t1.yaml
+tokenized: data/tokenized/v0.2/t1-bbpe-20544
+objective: mlm
+mask_rate: 0.30
+seq_len: 512
+micro_batch_size: 128
+grad_accum_steps: 4          # 262,144 tokens per optimizer step
+total_tokens: 5.0e8
+learning_rate: 8.0e-4
+warmup_ratio: 0.06
+min_lr_ratio: 0.1
+betas: [0.9, 0.98]
+weight_decay: 0.01
+grad_clip: 1.0
+precision: bf16
+seed: 1234
+device: auto
+compile: true                # operational
+sparse_prediction: true      # operational: MLM head on labelled positions only (same loss)
+log_every_steps: 10
+eval_every_steps: 250
+eval_sequences: 2048
+eval_mask_rate: 0.15        # validation always masks 15%, token-level, no variants
+checkpoint_every_minutes: 30
+lr_schedule: wsd
+decay_ratio: 0.2
+cross_document_attention: false
+source_weights:
+  wikipedia-vi-20231101: 2.0
+masking: pmi
+pmi_unit_share: 0.5

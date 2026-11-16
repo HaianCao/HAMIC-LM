@@ -210,7 +210,9 @@ class Pretrainer:
             return SpanUnits(max_length=self.config.span_max_length)
         if self.config.masking == "pmi":
             pairs = torch.from_numpy(self._pmi_pairs())
-            return PmiUnits(pairs, self.preset.vocab_size, special)
+            return PmiUnits(
+                pairs, self.preset.vocab_size, special, keep=self.config.pmi_unit_share
+            )
         return TokenUnits()
 
     def _pmi_pairs(self) -> np.ndarray[Any, Any]:

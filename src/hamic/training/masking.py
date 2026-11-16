@@ -116,21 +116,35 @@ class PmiUnits:
             :func:`mine_pmi_pairs`).
         vocab_size: Vocabulary size used to build the keys.
         special_ids: Ids that never join a unit.
+        keep: Probability that each listed pair occurrence joins its tokens. ``1.0`` masks
+            collocations whole every time; below 1 a collocation is sometimes split, so the
+            model also practises predicting one part of a word while the rest is visible
+            (pure PMI units never do, which costs token- and span-level accuracy).
     """
 
-    def __init__(self, pairs: torch.Tensor, vocab_size: int, special_ids: Iterable[int]) -> None:
+    def __init__(
+        self,
+        pairs: torch.Tensor,
+        vocab_size: int,
+        special_ids: Iterable[int],
+        keep: float = 1.0,
+    ) -> None:
+        if not 0 < keep <= 1:
+            raise ValueError("keep must be in (0, 1]")
         self.pairs = pairs.to(torch.int64)
         self.vocab_size = vocab_size
         self.special = torch.tensor(sorted(set(special_ids)), dtype=torch.long)
+        self.keep = keep
 
     def __call__(self, ids: torch.Tensor, generator: torch.Generator) -> torch.Tensor:
-        """A position starts a new unit unless it continues a listed pair."""
-        del generator
+        """A position starts a new unit unless it continues a listed (kept) pair."""
         ids = ids.long()
         keys = ids[:, :-1] * self.vocab_size + ids[:, 1:]
         joined = torch.isin(keys, self.pairs)
         regular = ~torch.isin(ids, self.special)
         joined &= regular[:, :-1] & regular[:, 1:]
+        if self.keep < 1:
+            joined &= torch.rand(keys.shape, generator=generator) < self.keep
         starts = torch.ones_like(ids, dtype=torch.bool)
         starts[:, 1:] = ~joined
         return _units_from_starts(starts)

@@ -45,6 +45,7 @@ _OPTIONAL_IDENTITY_FIELDS = (
     "mask_schedule_start",
     "masking",
     "span_max_length",
+    "pmi_unit_share",
     "variant_share",
 )
 
@@ -91,6 +92,9 @@ class PretrainConfig:
             (share of steps). ``None`` keeps the rate constant.
         mask_schedule_start: Share of steps before the mask rate starts to change.
         span_max_length: Longest span of ``masking: span`` (geometric, ``p = 0.2``).
+        pmi_unit_share: ``masking: pmi`` only: probability that each collocation occurrence
+            is masked as one unit (else its tokens are independent units). ``1.0`` is pure
+            PMI masking; ``0.5`` mixes word-level and token-level practice.
         masking: MLM selection unit: ``"token"``, ``"span"`` (geometric spans, SpanBERT)
             or ``"pmi"`` (runs of tokens joined by high-PMI pairs mined from the train
             split, a segmenter-free proxy for Vietnamese multi-syllable words).
@@ -143,6 +147,7 @@ class PretrainConfig:
     mask_schedule_start: float = 0.0
     masking: str = "token"
     span_max_length: int = 5
+    pmi_unit_share: float = 1.0
     variant_share: float = 0.0
     attention: str = "sdpa"
     sparse_prediction: bool = False
@@ -170,6 +175,8 @@ class PretrainConfig:
             raise ValueError(f"lr_schedule must be one of {LR_SCHEDULES}")
         if not 0 < self.decay_ratio <= 1:
             raise ValueError("decay_ratio must be in (0, 1]")
+        if not 0 < self.pmi_unit_share <= 1:
+            raise ValueError("pmi_unit_share must be in (0, 1]")
         if self.span_max_length < 1:
             raise ValueError("span_max_length must be >= 1")
         if self.masking not in MASKING_UNITS:

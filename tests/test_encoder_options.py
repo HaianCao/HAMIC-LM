@@ -354,3 +354,15 @@ def test_offline_evaluation_of_a_published_run(tmp_path, tokenized):  # noqa: F8
     assert set(first) == {"token", "span", "pmi"}
     assert first == again  # same seeded masks, same inputs
     assert all(np.isfinite(v) and v > 0 for v in first.values())
+
+
+def test_pmi_units_keep_share_splits_some_collocations():
+    pairs = torch.tensor([500 * 600 + 501])
+    ids = torch.tensor([[0, 100, 500, 501, 200, 2]]).repeat(4000, 1)
+    full = PmiUnits(pairs, 600, range(37))(ids, torch.Generator().manual_seed(0))
+    assert (full[:, 2] == full[:, 3]).all()  # keep=1.0: always one unit, no draws
+    half = PmiUnits(pairs, 600, range(37), keep=0.5)(ids, torch.Generator().manual_seed(0))
+    joined = (half[:, 2] == half[:, 3]).float().mean().item()
+    assert 0.45 < joined < 0.55
+    with pytest.raises(ValueError, match="keep"):
+        PmiUnits(pairs, 600, range(37), keep=0.0)
