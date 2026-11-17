@@ -7,7 +7,7 @@ name = "hamic"
 version = "0.1.0.dev0"
 description = "HAMIC: Vietnamese-first language model research toolkit."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "HAMIC" }]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",

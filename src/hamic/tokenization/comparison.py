@@ -17,7 +17,12 @@ PROBE_COLUMNS = (
     "numbers_money_dates",
     "emoji",
 )
-DEFAULT_HIDDEN_SIZES: Mapping[str, int] = {"E100M": 640, "D500M": 1280, "D1B": 2048}
+DEFAULT_HIDDEN_SIZES: Mapping[str, int] = {
+    "ES": 768,
+    "EM": 1024,
+    "D500M": 1280,
+    "D1B": 2048,
+}
 
 
 def _fmt(value: float, digits: int = 3) -> str:

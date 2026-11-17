@@ -1,0 +1,12 @@
+# Canonical medium encoder. The 1,024-d width is reinvested into 24 layers.
+name: HAMIC-EM
+architecture: modernbert
+label_parameters: 350000000.0
+num_layers: 28
+hidden_size: 1024
+num_heads: 16
+intermediate_size: 2432
+vocab_size: 20544
+max_position_embeddings: 2048
+rope_theta: 160000.0
+

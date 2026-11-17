@@ -1,47 +1,61 @@
 # Quy ước tên và model family HAMIC
 
+> **Quy ước canonical từ 2026-11-17:** encoder dùng size label thay cho số tham
+> số trong tên. Các tên `E100M`/`E300M` ở phần lịch sử bên dưới chỉ dùng để
+> truy vết checkpoint pilot và không được dùng cho run mới.
+
+| Size | Tên canonical | Profile đầu tiên | Run prefix |
+|---|---|---:|---|
+| Small | `HAMIC-ES` | 24 lớp × 768, khoảng 151M | `hamic-es-*` |
+| Medium | `HAMIC-EM` | 28 lớp × 1.024, khoảng 349M | `hamic-em-*` |
+| Large | `HAMIC-EL` | Chưa khóa | `hamic-el-*` |
+| Extra Large | `HAMIC-EXL` | Chưa khóa | `hamic-exl-*` |
+| Extra Extra Large | `HAMIC-EXXL` | Chưa khóa | `hamic-exxl-*` |
+
+`E` nghĩa là bidirectional encoder; `S/M/L/XL/XXL` là size. `M` trong `EM`
+nghĩa là **Medium**, không còn là hậu tố “modern candidate”. Kiến trúc thực
+(`modernbert`, `roberta`, ...) nằm trong config và manifest.
+
+Model card MUST ghi số tham số chính xác. `HAMIC-ES` và `HAMIC-EM` là model
+identity mới vì topology thay đổi; không strict-resume từ checkpoint
+`e100m-*`/`e300m-*`. Identifier và Hub path lịch sử giữ nguyên để bảo toàn
+provenance. Encoder–decoder mới dùng tên `HAMIC-ES-D500M`; decoder hiện vẫn giữ
+`D500M`/`D1B` cho tới khi có quyết định đổi decoder family.
+
 **Canonical:** có  
 **Áp dụng cho:** model repository, config, checkpoint manifest, báo cáo, model card và bài báo
 
 ## 1. Cấu trúc tên
 
-Tên hiển thị có dạng:
-
-`HAMIC-<TOPOLOGY_AND_SCALE>[-<VARIANT_OR_STAGE>]`
-
-Tên repository nên viết thường, dùng dấu gạch nối, ví dụ `hamic-e300m`.
+Tên hiển thị có dạng `HAMIC-<TOPOLOGY_AND_SIZE>[-<STAGE>]`. Tên repository
+viết thường và dùng dấu gạch nối, ví dụ `hamic-es`.
 
 | Thành phần | Ý nghĩa | Ví dụ |
 |---|---|---|
 | `HAMIC` | Prefix duy nhất của family | `HAMIC` |
-| `E` | Bidirectional encoder | `E100M`, `E300M` |
+| `E` | Bidirectional encoder | `ES`, `EM`, `EL` |
+| `S/M/L/XL/XXL` | Size label của encoder | `HAMIC-EXL` |
 | `D` | Causal decoder-only | `D500M`, `D1B` |
-| `E…-D…` | Một model encoder–decoder thống nhất | `E100M-D500M` |
-| Không hậu tố | Model pretrained/reference ở đúng topology và scale | `HAMIC-D1B` |
-| `M` | Modern architecture candidate dùng cho test/ablation; chưa phải model canonical | `HAMIC-D1B-M` |
-| `Instruct` | Đã instruction tuning | `HAMIC-D1B-Instruct` |
-| `Chat` | Instruct + hội thoại/safety recipe được mô tả | `HAMIC-D1B-Chat` |
-| `Embedding` | Encoder đã tuning cho biểu diễn/retrieval | `HAMIC-E300M-Embedding` |
+| `E…-D…` | Một model encoder–decoder thống nhất | `ES-D500M` |
+| `Instruct`, `Chat`, `Embedding` | Stage/tuning artifact | `HAMIC-EM-Embedding` |
 
 ## 2. Tên đã chốt
 
-| Model | Tên canonical | Bản test modern | Loại |
-|---|---|---|---|
-| Encoder nhỏ | `HAMIC-E100M` | `HAMIC-E100M-M` | Bidirectional encoder khoảng 100M |
-| Encoder lớn | `HAMIC-E300M` | `HAMIC-E300M-M` | Bidirectional encoder khoảng 300M |
-| Decoder nhỏ | `HAMIC-D500M` | `HAMIC-D500M-M` | Dense causal decoder khoảng 500M; cùng GQA/RoPE/SwiGLU family và tokenizer với D1B |
-| Decoder lớn | `HAMIC-D1B` | `HAMIC-D1B-M` | Dense causal decoder khoảng 1B; GQA/RoPE/SwiGLU family |
-| Encoder–decoder | `HAMIC-E100M-D500M` | `HAMIC-E100M-D500M-M` nếu có modern ED experiment riêng | Model seq2seq có encoder và decoder liên kết bằng cross-attention/bridge |
+| Model | Tên canonical | Loại |
+|---|---|---|
+| Encoder small | `HAMIC-ES` | 24×768, khoảng 151M |
+| Encoder medium | `HAMIC-EM` | 28×1.024, khoảng 349M |
+| Encoder lớn hơn | `HAMIC-EL`, `HAMIC-EXL`, `HAMIC-EXXL` | Topology chưa khóa |
+| Decoder nhỏ | `HAMIC-D500M` | Dense causal decoder khoảng 500M |
+| Decoder lớn | `HAMIC-D1B` | Dense causal decoder khoảng 1B |
+| Encoder–decoder | `HAMIC-ES-D500M` | Unified seq2seq với cross-attention/bridge đã train |
 
-`Pretrained/base`, `instruct`, `chat` và `embedding` vẫn là metadata stage/type, nhưng model pretrained không thêm `-Base` vào tên. Bản `-M` chỉ dùng trong experiment registry/checkpoint test; nếu recipe modern thắng và trở thành canonical, artifact phát hành quay về tên không hậu tố với config hash mới.
+## 3. Tên lịch sử
 
-## 3. Cách hiểu scale
-
-- `100M`, `300M`, `500M`, `1B` là lớp quy mô, không phải cam kết số nguyên chính xác.
-- Sai số mục tiêu SHOULD nằm trong khoảng ±5%; ngoại lệ phải giải thích.
-- `E100M-D500M` mô tả quy mô backbone encoder và decoder trước khi tính đầy đủ cross-attention, bridge, task head hoặc adapter.
-- Do cross-attention thêm tham số, tổng của `E100M-D500M` có thể khoảng 0,65–0,73B tùy topology. Model card MUST ghi `total_parameters`, `trainable_parameters` và cách tính.
-- Không dùng `base`/`large` trong tên vì chúng thường gợi cấu hình RoBERTa chuẩn 125M/355M, trong khi HAMIC ghi trực tiếp scale `100M`, `300M`, `500M`, `1B`. Cặp nhỏ/lớn của cùng topology (E100M/E300M, D500M/D1B) đóng vai trò tương tự base/large nhưng tên luôn ghi scale.
+`HAMIC-E100M`, `HAMIC-E100M-M`, `HAMIC-E300M`, `HAMIC-E300M-M` và các
+run `e100m-*`/`e300m-*` là identifier bất biến của pilot. Báo cáo lịch sử có
+thể ánh xạ chúng sang family ES/EM, nhưng không đổi tên artifact và không
+strict-resume sang topology canonical mới.
 
 ## 4. Nhà phát triển và thương hiệu
 
@@ -57,9 +71,9 @@ Không được dùng tên và logo tổ chức như một xác nhận chính th
 
 ## 5. Quy tắc revision
 
-- Hiện chưa có artifact nào được train hay phát hành, nên tên model không gắn số phiên bản.
+- Các pilot `e100m-*`/`e300m-*` đã tồn tại; giữ nguyên tên và revision của chúng.
 - Identity của mỗi checkpoint/run/release là revision bất biến: Git SHA, model config SHA, tokenizer SHA, corpus manifest SHA và checkpoint SHA.
-- Đổi tokenizer, architecture, objective chính hoặc license/release contract tạo model identity mới (run family mới), không nối tiếp lineage cũ.
+- Đổi tokenizer, architecture, hidden size, số lớp, objective chính hoặc license/release contract tạo model identity mới (run family mới), không nối tiếp lineage cũ.
 - Mở rộng recipe/data mà vẫn tương thích tokenizer và architecture tạo revision mới trong cùng model identity.
 - Quy ước đánh số phiên bản phát hành chỉ được quyết định khi có checkpoint đầu tiên vượt data, engineering, evaluation và release gate.
 

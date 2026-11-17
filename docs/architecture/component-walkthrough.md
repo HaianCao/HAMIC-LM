@@ -37,11 +37,11 @@ Họ model:
 
 | Model | Loại | Dùng để làm gì | Quy mô |
 |---|---|---|---:|
-| HAMIC-E100M | Encoder (đọc hai chiều) | Phân loại, NER, QA trích xuất, chạy nhẹ | ~100M |
-| HAMIC-E300M | Encoder | Như trên, chất lượng cao hơn | ~300M |
+| HAMIC-ES | Encoder (đọc hai chiều) | Phân loại, NER, QA trích xuất, chạy nhẹ | ~151M |
+| HAMIC-EM | Encoder | Như trên, chất lượng cao hơn | ~349M |
 | HAMIC-D500M | Decoder (sinh chữ từ trái sang phải) | Sinh văn bản, nền cho SFT, decoder của ED | ~500M |
 | HAMIC-D1B | Decoder | Như trên, lớn hơn | ~1B |
-| HAMIC-E100M-D500M | Encoder–decoder | Tóm tắt, viết lại, sửa lỗi, QA sinh | ~0,65–0,73B |
+| HAMIC-ES-D500M | Encoder–decoder | Tóm tắt, viết lại, sửa lỗi, QA sinh | Chờ chốt topology cross-attention |
 
 Mỗi model có hai bản: **reference** (cấu hình quen thuộc, dùng làm đối chứng) và **`-M`** (bản hiện đại đang thử). Bản nào thắng trong thí nghiệm thì thành bản chính thức.
 
@@ -270,12 +270,12 @@ Phần này chung, không riêng tiếng Việt. Mục đích là train ổn đ�
 
 Với cùng số tham số, có thể làm model **rộng** (ít lớp, mỗi lớp to) hoặc **sâu** (nhiều lớp, mỗi lớp nhỏ). Model nhỏ hiện đại (MobileLLM, SmolLM, Qwen3-0.6B) thiên về sâu–mỏng.
 
-| Model | Reference | `-M` |
+| Model | Shape canonical | Ghi chú |
 |---|---|---|
-| E100M | 14 lớp × 640 | 18 lớp × 640 |
-| E300M | 16 lớp × 1.152 | 18 lớp × 1.152 |
-| D500M | 24 lớp × 1.280 | 28 lớp × 1.280 |
-| D1B | 22 lớp × 2.048 | 24 lớp × 2.048 |
+| HAMIC-ES | 24 lớp × 768 | ~150,9M; thay family E100M cho run mới |
+| HAMIC-EM | 28 lớp × 1.024 | ~348,8M; thay family E300M cho run mới |
+| D500M | 28 lớp × 1.280 (`-M`) | Decoder naming chưa đổi |
+| D1B | 24 lớp × 2.048 (`-M`) | Decoder naming chưa đổi |
 
 Đánh đổi: sâu hơn thường tốt hơn về chất lượng nhưng sinh chữ chậm hơn một chút. Phải thử nghiệm mới chốt.
 
@@ -371,8 +371,8 @@ Cách này học theo SmolLM2, Qwen3, Sailor2 (Sailor2 giữ khoảng 20% dữ l
 
 | Model | Thử nghiệm | Ứng viên | Mục tiêu nghiên cứu |
 |---|---:|---:|---:|
-| E100M | 0,1–1B | 2–4B | 20B nếu đáng |
-| E300M | 0,2–3B | 6B | 20–50B |
+| HAMIC-ES | E100M pilot 7,5B | v0.5: 20B | continuation chỉ mở theo eval gate |
+| HAMIC-EM | E300M pilot 3B | v0.5: 20B | continuation chỉ mở theo eval gate |
 | D500M | 0,1–1B | 5B | 10B (20B nếu đáng) |
 | D1B | 0,1–1B | 5B | 20B |
 
@@ -403,29 +403,31 @@ Model base không bị chấm như chatbot. Bộ test chính thức không đư�
 
 ## 13. Tóm tắt từng model
 
-### HAMIC-E100M / E100M-M
+### HAMIC-ES
 
-| | Reference | `-M` |
-|---|---|---|
-| Lớp × rộng | 14 × 640 | 18 × 640 |
-| Head | 10 × 64 | 10 × 64 |
-| FFN | GELU 2.560 | GeGLU 1.728 |
-| Vocab | 48K | 20.544 |
-| Vị trí | Absolute | RoPE |
-| Norm | Post-LN | Pre-LN |
-| Mục tiêu | MLM 15% | MLM 15% vs 30% |
-| Params (đo runtime) | 100,8M | 102,8M |
+| Thuộc tính | Giá trị |
+|---|---:|
+| Lớp × rộng | 24 × 768 |
+| Head | 12 × 64 |
+| FFN | GeGLU 1.408 |
+| Vocab / vị trí | 20.544 / RoPE |
+| Norm / mục tiêu | Pre-LN / MLM 30% |
+| Params | 150.906.432 |
+| Run đầu tiên | cumulative v0.5, 20B token |
 
-### HAMIC-E300M / E300M-M
+### HAMIC-EM
 
-| | Reference | `-M` |
-|---|---|---|
-| Lớp × rộng | 16 × 1.152 | 18 × 1.152 |
-| FFN | GELU 4.096 | GeGLU 2.752 |
-| Vocab / vị trí | 48K / absolute | 20.544 / RoPE |
-| Params (đo runtime) | 294,0M | 291,8M |
+| Thuộc tính | Giá trị |
+|---|---:|
+| Lớp × rộng | 28 × 1.024 |
+| Head | 16 × 64 |
+| FFN | GeGLU 2.432 |
+| Vocab / vị trí | 20.544 / RoPE |
+| Norm / mục tiêu | Pre-LN / MLM 30% |
+| Params | 348.796.992 |
+| Run đầu tiên | cumulative v0.5, 20B token |
 
-Chỉ chạy sau khi E100M đã chốt tokenizer và mục tiêu huấn luyện.
+Các profile E100M/E300M cũ là pilot lịch sử và không strict-resume sang ES/EM.
 
 ### HAMIC-D500M / D500M-M
 
@@ -451,11 +453,11 @@ Chạy **trước** D1B, vì với ngân sách GPU hiện có thì cỡ ~500M l�
 
 Mốc 20B token chỉ mở khi đường scaling D-proxy → D500M → D1B cho thấy đáng đầu tư.
 
-### HAMIC-E100M-D500M
+### HAMIC-ES-D500M
 
-- Encoder E100M (bản thắng) + decoder D500M (bản thắng) + cross-attention.
-- Ba phương án: cross-attention ở mọi lớp (~725M), cách một lớp (~675M), thưa (~650M).
-- Khởi tạo từ E100M và D500M đã train, rồi train tiếp phần nối và toàn bộ model. Ghép hai checkpoint lại **không** tự động thành model hoàn chỉnh.
+- Encoder ES + decoder D500M (bản thắng) + cross-attention.
+- Ba phương án: cross-attention ở mọi lớp (~776M), cách một lớp (~724M), thưa (~698M).
+- Khởi tạo từ ES và D500M đã train, rồi train tiếp phần nối và toàn bộ model. Ghép hai checkpoint lại **không** tự động thành model hoàn chỉnh.
 
 ---
 

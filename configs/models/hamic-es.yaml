@@ -1,0 +1,12 @@
+# Canonical small encoder. Deep-and-narrow ModernBERT profile with 64-d heads.
+name: HAMIC-ES
+architecture: modernbert
+label_parameters: 150000000.0
+num_layers: 24
+hidden_size: 768
+num_heads: 12
+intermediate_size: 1408
+vocab_size: 20544
+max_position_embeddings: 2048
+rope_theta: 160000.0
+
