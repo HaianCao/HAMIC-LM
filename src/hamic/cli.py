@@ -192,6 +192,67 @@ def _cmd_corpus_annotate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _source_weights(items: Sequence[str]) -> dict[str, float]:
+    """Parse repeated ``SOURCE=WEIGHT`` CLI values."""
+    weights: dict[str, float] = {}
+    for item in items:
+        source, separator, value = item.partition("=")
+        if not separator or not source:
+            raise SystemExit(f"Invalid source weight {item!r}; expected SOURCE=WEIGHT")
+        weights[source] = float(value)
+    return weights
+
+
+def _cmd_corpus_sample(args: argparse.Namespace) -> int:
+    from hamic.data import sample_corpora
+
+    manifest = sample_corpora(
+        args.corpus,
+        args.out,
+        args.documents,
+        seed=args.seed,
+        source_weights=_source_weights(args.source_weight),
+        shard_documents=args.shard_documents,
+    )
+    _print_json(
+        {
+            "output": args.out,
+            "documents": manifest["documents"],
+            "characters": manifest["characters"],
+            "files": len(manifest["files"]),
+            "sources": manifest["sources"],
+        }
+    )
+    return 0
+
+
+def _cmd_corpus_sample_tokenized(args: argparse.Namespace) -> int:
+    from hamic.data import sample_published_tokenized
+
+    manifest = sample_published_tokenized(
+        args.tokenized,
+        _store(args.store),
+        args.prefix,
+        args.out,
+        args.tokens,
+        seed=args.seed,
+        source_weights=_source_weights(args.source_weight),
+        shard_documents=args.shard_documents,
+        batch_size=args.batch_size,
+        shard_indices=args.shard_index or None,
+    )
+    _print_json(
+        {
+            "output": args.out,
+            "covered_tokens": manifest["selection"]["covered_tokens"],
+            "documents": manifest["documents"],
+            "files": len(manifest["files"]),
+            "sources": manifest["sources"],
+        }
+    )
+    return 0
+
+
 def _cmd_tokenizer_train(args: argparse.Namespace) -> int:
     from hamic.tokenization import TokenizerKind, TokenizerSpec, export_tokenizer, train_tokenizer
 
@@ -389,6 +450,49 @@ def _parser() -> argparse.ArgumentParser:
     annotate.add_argument("--corpus", required=True, help="frozen corpus the shards came from")
     annotate.add_argument("--tokenized", required=True, help="tokenized directory to update")
     annotate.set_defaults(func=_cmd_corpus_annotate)
+
+    sample = corpus.add_parser(
+        "sample", help="deterministically sample train documents from corpus deltas"
+    )
+    sample.add_argument("--corpus", nargs="+", required=True, help="frozen base/delta dirs")
+    sample.add_argument("--out", required=True, help="new sample directory")
+    sample.add_argument(
+        "--documents", type=int, required=True, help="expected documents before weighting"
+    )
+    sample.add_argument("--seed", default="hamic-tokenizer-sample-v1")
+    sample.add_argument(
+        "--source-weight",
+        action="append",
+        default=[],
+        metavar="SOURCE=WEIGHT",
+        help="multiply the selection probability for one source (repeatable)",
+    )
+    sample.add_argument("--shard-documents", type=int, default=50_000)
+    sample.set_defaults(func=_cmd_corpus_sample)
+
+    sample_tokens = corpus.add_parser(
+        "sample-tokenized",
+        help="decode and round-trip-check distributed published token shards",
+    )
+    sample_tokens.add_argument("--tokenized", required=True, help="local lightweight manifest")
+    sample_tokens.add_argument("--store", required=True, help=store_help)
+    sample_tokens.add_argument("--prefix", required=True, help="current published folder")
+    sample_tokens.add_argument("--out", required=True, help="new decoded sample directory")
+    sample_tokens.add_argument("--tokens", type=int, required=True, help="approximate coverage")
+    sample_tokens.add_argument("--seed", default="hamic-tokenizer-shards-v1")
+    sample_tokens.add_argument(
+        "--source-weight", action="append", default=[], metavar="SOURCE=WEIGHT"
+    )
+    sample_tokens.add_argument("--shard-documents", type=int, default=50_000)
+    sample_tokens.add_argument("--batch-size", type=int, default=256)
+    sample_tokens.add_argument(
+        "--shard-index",
+        action="append",
+        type=int,
+        default=[],
+        help="decode this exact train-shard index instead of quantiles (repeatable)",
+    )
+    sample_tokens.set_defaults(func=_cmd_corpus_sample_tokenized)
 
     tok = sub.add_parser("tokenizer", help="tokenizer training and evaluation").add_subparsers(
         dest="tokenizer_command", required=True

@@ -46,6 +46,13 @@ _OPTIONAL_IDENTITY_FIELDS = (
     "masking",
     "span_max_length",
     "pmi_unit_share",
+    "pmi_max_tokens",
+    "pmi_min_count",
+    "pmi_min_pmi",
+    "pmi_max_pairs",
+    "pmi_discount_k",
+    "pmi_chunk_tokens",
+    "pmi_max_unit_length",
     "variant_share",
 )
 
@@ -95,6 +102,16 @@ class PretrainConfig:
         pmi_unit_share: ``masking: pmi`` only: probability that each collocation occurrence
             is masked as one unit (else its tokens are independent units). ``1.0`` is pure
             PMI masking; ``0.5`` mixes word-level and token-level practice.
+        pmi_max_tokens: Most train tokens inspected while mining the collocation table.
+        pmi_min_count: Minimum adjacent-pair count retained for PMI scoring.
+        pmi_min_pmi: Minimum raw PMI in nats. Discounting changes ranking, not this gate.
+        pmi_max_pairs: Maximum number of collocation pairs in the masking table.
+        pmi_discount_k: Reliability discount ``count / (count + k)`` applied to PMI when
+            ranking pairs. ``0`` preserves raw-PMI behaviour.
+        pmi_chunk_tokens: Pair occurrences reduced per temporary disk run. ``None`` retains
+            the all-in-memory miner; set this for 500M-token mining.
+        pmi_max_unit_length: Most tokens joined into one PMI unit. ``None`` preserves the
+            unrestricted legacy behaviour.
         masking: MLM selection unit: ``"token"``, ``"span"`` (geometric spans, SpanBERT)
             or ``"pmi"`` (runs of tokens joined by high-PMI pairs mined from the train
             split, a segmenter-free proxy for Vietnamese multi-syllable words).
@@ -148,6 +165,13 @@ class PretrainConfig:
     masking: str = "token"
     span_max_length: int = 5
     pmi_unit_share: float = 1.0
+    pmi_max_tokens: int = 100_000_000
+    pmi_min_count: int = 50
+    pmi_min_pmi: float = 3.0
+    pmi_max_pairs: int = 200_000
+    pmi_discount_k: float = 0.0
+    pmi_chunk_tokens: int | None = None
+    pmi_max_unit_length: int | None = None
     variant_share: float = 0.0
     attention: str = "sdpa"
     sparse_prediction: bool = False
@@ -177,6 +201,14 @@ class PretrainConfig:
             raise ValueError("decay_ratio must be in (0, 1]")
         if not 0 < self.pmi_unit_share <= 1:
             raise ValueError("pmi_unit_share must be in (0, 1]")
+        if min(self.pmi_max_tokens, self.pmi_min_count, self.pmi_max_pairs) < 1:
+            raise ValueError("PMI token, count and pair limits must be positive")
+        if self.pmi_discount_k < 0:
+            raise ValueError("pmi_discount_k must be non-negative")
+        if self.pmi_chunk_tokens is not None and self.pmi_chunk_tokens < 1:
+            raise ValueError("pmi_chunk_tokens must be positive or null")
+        if self.pmi_max_unit_length is not None and self.pmi_max_unit_length < 2:
+            raise ValueError("pmi_max_unit_length must be >= 2 or null")
         if self.span_max_length < 1:
             raise ValueError("span_max_length must be >= 1")
         if self.masking not in MASKING_UNITS:
@@ -250,9 +282,15 @@ class PretrainConfig:
             values["source_weights"] = {
                 str(k): float(v) for k, v in values["source_weights"].items()
             }
-        for key in ("total_tokens",):
+        for key in (
+            "total_tokens",
+            "pmi_max_tokens",
+            "pmi_min_count",
+            "pmi_max_pairs",
+            "pmi_chunk_tokens",
+        ):
             if key in values:
-                values[key] = int(float(values[key]))
+                values[key] = None if values[key] is None else int(float(values[key]))
         return cls(**values)
 
     @classmethod

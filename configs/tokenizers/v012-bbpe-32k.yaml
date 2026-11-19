@@ -1,0 +1,7 @@
+# Corpus-v0.12 tokenizer candidate. Train on the frozen balanced decoded-shard sample.
+name: v012-bbpe-32k
+vocab_size: 32000
+input_mode: raw
+digit_mode: grouped
+min_frequency: 2
+model_max_length: 2048

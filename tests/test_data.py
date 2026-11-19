@@ -18,6 +18,8 @@ from hamic.data import (
     SourceStatus,
     SplitStage,
     UseCase,
+    read_jsonl,
+    sample_corpora,
     write_jsonl,
 )
 
@@ -162,6 +164,58 @@ def test_pipeline_refuses_unapproved_source(tmp_path: Path):
     registry = SourceRegistry({"s": _record("s", SourceStatus.PENDING)})
     with pytest.raises(SourceNotApprovedError):
         CorpusPipeline(registry).run([JsonlSource("s", [])], tmp_path / "out", "v")
+
+
+def _frozen_sample_input(path: Path, version: str, documents: list[Document]) -> Path:
+    train = path / "train" / "part-00000.jsonl.gz"
+    write_jsonl(train, documents)
+    manifest = {
+        "corpus_version": version,
+        "splits": {
+            "train": {
+                "documents": len(documents),
+                "characters": sum(len(document.text) for document in documents),
+                "files": [{"path": "train/part-00000.jsonl.gz"}],
+            }
+        },
+    }
+    (path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return path
+
+
+def test_corpus_sample_is_deterministic_streaming_and_train_only(tmp_path: Path):
+    first_docs = [Document(f"a{i}", f"vÄƒn báº£n {i}", "a") for i in range(100)]
+    second_docs = [Document(f"b{i}", f"tÃ i liá»‡u {i}", "b") for i in range(100)]
+    first = _frozen_sample_input(tmp_path / "v1", "v1", first_docs)
+    second = _frozen_sample_input(tmp_path / "v2", "v2", second_docs)
+    one = sample_corpora([first, second], tmp_path / "one", 50, seed="fixed", shard_documents=9)
+    two = sample_corpora([second, first], tmp_path / "two", 50, seed="fixed", shard_documents=9)
+
+    def ids(root: Path, manifest: dict) -> set[str]:
+        return {
+            document.doc_id
+            for entry in manifest["files"]
+            for document in read_jsonl(root / entry["path"])
+        }
+
+    assert ids(tmp_path / "one", one) == ids(tmp_path / "two", two)
+    assert one["documents"] == sum(item["documents"] for item in one["sources"].values())
+    assert len(one["files"]) > 1
+    assert (tmp_path / "one" / "sample_manifest.json").is_file()
+
+
+def test_corpus_sample_source_weight_and_validation(tmp_path: Path):
+    documents = [Document(f"d{i}", "x" * 10, "s") for i in range(100)]
+    corpus = _frozen_sample_input(tmp_path / "v1", "v1", documents)
+    base = sample_corpora([corpus], tmp_path / "base", 25, seed="fixed")
+    weighted = sample_corpora(
+        [corpus], tmp_path / "weighted", 25, seed="fixed", source_weights={"s": 2.0}
+    )
+    assert weighted["documents"] >= base["documents"]
+    with pytest.raises(FileExistsError):
+        sample_corpora([corpus], tmp_path / "base", 25)
+    with pytest.raises(ValueError, match="duplicate corpus version"):
+        sample_corpora([corpus, corpus], tmp_path / "duplicate", 25)
 
 
 def test_pii_filter_drops_secrets():

@@ -19,6 +19,7 @@ from hamic.data.registry import (
     SourceStatus,
     UseCase,
 )
+from hamic.data.sampling import SAMPLE_MANIFEST, sample_corpora, sample_published_tokenized
 from hamic.data.stages import (
     ContaminationFilterStage,
     ExactDedupStage,
@@ -41,6 +42,7 @@ from hamic.data.tokenized import (
 )
 
 __all__ = [
+    "SAMPLE_MANIFEST",
     "ContaminationFilterStage",
     "CorpusPipeline",
     "DedupIndex",
@@ -74,6 +76,8 @@ __all__ = [
     "index_corpus",
     "publish_tokenized",
     "read_jsonl",
+    "sample_corpora",
+    "sample_published_tokenized",
     "shuffled_files",
     "tokenize_corpus",
     "write_jsonl",

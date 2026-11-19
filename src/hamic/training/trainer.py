@@ -25,7 +25,7 @@ from hamic.checkpoint.storage import ObjectStore
 from hamic.data.tokenized import TokenizedCorpus
 from hamic.modeling.factory import build_model
 from hamic.modeling.presets import Architecture, ModelPreset
-from hamic.provenance import code_revision, environment_fingerprint, utc_now
+from hamic.provenance import code_revision, environment_fingerprint, json_sha256, utc_now
 from hamic.runtime.session import HOUR, SessionClock
 from hamic.training.attention import DocumentMask, document_ids
 from hamic.training.compat import check_strict_resume
@@ -48,9 +48,6 @@ __all__ = ["Pretrainer", "TrainResult"]
 
 COMPLETE_NAME = "COMPLETE.json"
 _EVAL_SEED_OFFSET = 1 << 40
-_PMI_TOKENS = 100_000_000
-
-
 @dataclass
 class TrainResult:
     """Outcome of one session.
@@ -211,13 +208,33 @@ class Pretrainer:
         if self.config.masking == "pmi":
             pairs = torch.from_numpy(self._pmi_pairs())
             return PmiUnits(
-                pairs, self.preset.vocab_size, special, keep=self.config.pmi_unit_share
+                pairs,
+                self.preset.vocab_size,
+                special,
+                keep=self.config.pmi_unit_share,
+                max_length=self.config.pmi_max_unit_length,
             )
         return TokenUnits()
 
     def _pmi_pairs(self) -> np.ndarray[Any, Any]:
-        """Collocations mined from the first train tokens; cached per corpus revision."""
-        digest = self.corpus.manifest["source_corpus"]["manifest_sha256"][:16]
+        """Collocations mined from train tokens and cached by every material input."""
+        cfg = self.config
+        mining = {
+            "max_tokens": cfg.pmi_max_tokens,
+            "min_count": cfg.pmi_min_count,
+            "min_pmi": cfg.pmi_min_pmi,
+            "max_pairs": cfg.pmi_max_pairs,
+            "discount_k": cfg.pmi_discount_k,
+            "chunk_tokens": cfg.pmi_chunk_tokens,
+            "eligibility": "word_tokens-v1",
+        }
+        digest = json_sha256(
+            {
+                "source_corpus": self.corpus.manifest["source_corpus"],
+                "tokenizer": self.corpus.manifest["tokenizer"],
+                "mining": mining,
+            }
+        )[:16]
         cache = self.workdir / f"pmi-pairs-{digest}.npy"
         if cache.is_file():
             cached: np.ndarray[Any, Any] = np.load(cache)
@@ -226,8 +243,14 @@ class Pretrainer:
             self.corpus.documents("train"),
             self.preset.vocab_size,
             special_ids=range(len(self.preset.special_tokens.ordered)),
-            max_tokens=_PMI_TOKENS,
+            max_tokens=cfg.pmi_max_tokens,
+            min_count=cfg.pmi_min_count,
+            min_pmi=cfg.pmi_min_pmi,
+            max_pairs=cfg.pmi_max_pairs,
             eligible=word_tokens(self.corpus.tokenizer_file()),
+            discount_k=cfg.pmi_discount_k,
+            scratch_dir=self.workdir / "pmi-count-runs" if cfg.pmi_chunk_tokens else None,
+            chunk_tokens=cfg.pmi_chunk_tokens,
         )
         np.save(cache, pairs, allow_pickle=False)
         return pairs

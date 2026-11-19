@@ -19,7 +19,10 @@ reproducible across resumes.
 
 from __future__ import annotations
 
+import heapq
 import json
+import math
+import tempfile
 import unicodedata
 from collections import defaultdict
 from collections.abc import Iterable
@@ -120,6 +123,9 @@ class PmiUnits:
             collocations whole every time; below 1 a collocation is sometimes split, so the
             model also practises predicting one part of a word while the rest is visible
             (pure PMI units never do, which costs token- and span-level accuracy).
+        max_length: Most tokens in one joined unit. ``None`` preserves unrestricted legacy
+            behaviour. A finite limit prevents chains of individually strong pairs from
+            turning an entire phrase into one masking unit.
     """
 
     def __init__(
@@ -128,13 +134,17 @@ class PmiUnits:
         vocab_size: int,
         special_ids: Iterable[int],
         keep: float = 1.0,
+        max_length: int | None = None,
     ) -> None:
         if not 0 < keep <= 1:
             raise ValueError("keep must be in (0, 1]")
+        if max_length is not None and max_length < 2:
+            raise ValueError("max_length must be >= 2 or None")
         self.pairs = pairs.to(torch.int64)
         self.vocab_size = vocab_size
         self.special = torch.tensor(sorted(set(special_ids)), dtype=torch.long)
         self.keep = keep
+        self.max_length = max_length
 
     def __call__(self, ids: torch.Tensor, generator: torch.Generator) -> torch.Tensor:
         """A position starts a new unit unless it continues a listed (kept) pair."""
@@ -147,6 +157,14 @@ class PmiUnits:
             joined &= torch.rand(keys.shape, generator=generator) < self.keep
         starts = torch.ones_like(ids, dtype=torch.bool)
         starts[:, 1:] = ~joined
+        if self.max_length is not None:
+            # Split long chains without a Python loop over sequence positions. ``last_start``
+            # gives the start offset of each unrestricted unit; every max_length-th token in
+            # that unit becomes an additional boundary.
+            positions = torch.arange(ids.shape[1], device=ids.device).expand_as(ids)
+            last_start = torch.where(starts, positions, 0).cummax(dim=1).values
+            offset = positions - last_start
+            starts |= (offset > 0) & (offset.remainder(self.max_length) == 0)
         return _units_from_starts(starts)
 
 
@@ -159,12 +177,17 @@ def mine_pmi_pairs(
     min_pmi: float = 3.0,
     max_pairs: int = 200_000,
     eligible: np.ndarray[Any, Any] | None = None,
+    discount_k: float = 0.0,
+    scratch_dir: str | Path | None = None,
+    chunk_tokens: int | None = None,
 ) -> np.ndarray[Any, Any]:
     """Mine frequent, strongly associated adjacent token pairs.
 
     PMI is ``log(p(a, b) / (p(a) p(b)))`` over adjacent pairs inside documents. Pairs seen
     at least ``min_count`` times with PMI at least ``min_pmi`` are kept, the highest PMI
-    first, at most ``max_pairs``.
+    first, at most ``max_pairs``. When ``discount_k`` is positive, ranking uses
+    ``PMI * count / (count + discount_k)`` after the raw-PMI threshold. This reduces the
+    tendency of barely frequent pairs to outrank well-supported collocations.
 
     Args:
         documents: Token ids per document, read until ``max_tokens`` are seen.
@@ -176,10 +199,38 @@ def mine_pmi_pairs(
         max_pairs: Most pairs returned.
         eligible: Optional boolean mask over the vocabulary; only pairs of two eligible
             tokens are kept (e.g. :func:`word_tokens`, so punctuation never joins a unit).
+        discount_k: Reliability discount used for ranking. ``0`` is legacy raw PMI.
+        scratch_dir: Parent directory for temporary sorted count runs. Required with
+            ``chunk_tokens``; temporary files are removed after the table is selected.
+        chunk_tokens: Approximate adjacent pairs reduced per in-memory chunk. ``None`` uses
+            the legacy all-in-memory implementation.
 
     Returns:
         Sorted ``int64`` keys ``left * vocab_size + right``.
     """
+    if max_tokens < 1 or min_count < 1 or max_pairs < 1:
+        raise ValueError("max_tokens, min_count and max_pairs must be positive")
+    if discount_k < 0:
+        raise ValueError("discount_k must be non-negative")
+    if (scratch_dir is None) != (chunk_tokens is None):
+        raise ValueError("scratch_dir and chunk_tokens must be passed together")
+    if chunk_tokens is not None and chunk_tokens < 1:
+        raise ValueError("chunk_tokens must be positive")
+    if chunk_tokens is not None:
+        assert scratch_dir is not None
+        return _mine_pmi_pairs_spilled(
+            documents,
+            vocab_size,
+            special_ids,
+            max_tokens,
+            min_count,
+            min_pmi,
+            max_pairs,
+            eligible,
+            discount_k,
+            Path(scratch_dir),
+            chunk_tokens,
+        )
     special = np.array(sorted(set(special_ids)), dtype=np.int64)
     unigram = np.zeros(vocab_size, dtype=np.int64)
     chunks: list[np.ndarray[Any, Any]] = []
@@ -209,9 +260,135 @@ def mine_pmi_pairs(
         unigram[left] / total_tokens * unigram[right] / total_tokens
     )
     strong = pmi >= min_pmi
-    keys, pmi = keys[strong], pmi[strong]
-    best = np.argsort(-pmi, kind="stable")[:max_pairs]
+    keys, counts, pmi = keys[strong], counts[strong], pmi[strong]
+    score = pmi if discount_k == 0 else pmi * counts / (counts + discount_k)
+    best = np.argsort(-score, kind="stable")[:max_pairs]
     return np.sort(keys[best])
+
+
+def _write_count_run(
+    directory: Path, index: int, chunks: list[np.ndarray[Any, Any]]
+) -> tuple[Path, Path]:
+    """Reduce pair occurrences to one sorted key/count run on disk."""
+    keys, counts = np.unique(np.concatenate(chunks), return_counts=True)
+    key_path = directory / f"run-{index:05d}.keys.npy"
+    count_path = directory / f"run-{index:05d}.counts.npy"
+    np.save(key_path, keys.astype(np.int64, copy=False), allow_pickle=False)
+    np.save(count_path, counts.astype(np.int64, copy=False), allow_pickle=False)
+    return key_path, count_path
+
+
+def _mine_pmi_pairs_spilled(
+    documents: Iterable[np.ndarray[Any, Any]],
+    vocab_size: int,
+    special_ids: Iterable[int],
+    max_tokens: int,
+    min_count: int,
+    min_pmi: float,
+    max_pairs: int,
+    eligible: np.ndarray[Any, Any] | None,
+    discount_k: float,
+    scratch_dir: Path,
+    chunk_tokens: int,
+) -> np.ndarray[Any, Any]:
+    """Exact PMI mining with bounded occurrence memory and disk-backed sorted runs."""
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    special = np.array(sorted(set(special_ids)), dtype=np.int64)
+    unigram = np.zeros(vocab_size, dtype=np.int64)
+    seen = 0
+    pending = 0
+    chunks: list[np.ndarray[Any, Any]] = []
+    with tempfile.TemporaryDirectory(prefix="hamic-pmi-", dir=scratch_dir) as temporary:
+        directory = Path(temporary)
+        paths: list[tuple[Path, Path]] = []
+        for document in documents:
+            ids = np.asarray(document, dtype=np.int64)
+            if ids.size == 0:
+                continue
+            unigram += np.bincount(ids, minlength=vocab_size)
+            seen += ids.size
+            if ids.size > 1:
+                regular = ~(np.isin(ids[:-1], special) | np.isin(ids[1:], special))
+                pairs = (ids[:-1] * vocab_size + ids[1:])[regular]
+                if pairs.size:
+                    chunks.append(pairs)
+                    pending += pairs.size
+            if pending >= chunk_tokens:
+                paths.append(_write_count_run(directory, len(paths), chunks))
+                chunks, pending = [], 0
+            if seen >= max_tokens:
+                break
+        if chunks:
+            paths.append(_write_count_run(directory, len(paths), chunks))
+        if not paths:
+            return np.zeros(0, dtype=np.int64)
+        return _select_from_count_runs(
+            paths,
+            unigram,
+            eligible,
+            vocab_size,
+            min_count,
+            min_pmi,
+            max_pairs,
+            discount_k,
+        )
+
+
+def _select_from_count_runs(
+    paths: list[tuple[Path, Path]],
+    unigram: np.ndarray[Any, Any],
+    eligible: np.ndarray[Any, Any] | None,
+    vocab_size: int,
+    min_count: int,
+    min_pmi: float,
+    max_pairs: int,
+    discount_k: float,
+) -> np.ndarray[Any, Any]:
+    """K-way merge exact counts and retain only the strongest pairs in memory."""
+    key_runs = [np.load(key_path, mmap_mode="r") for key_path, _ in paths]
+    count_runs = [np.load(count_path, mmap_mode="r") for _, count_path in paths]
+    total_pairs = sum(int(counts.sum()) for counts in count_runs)
+    total_tokens = int(unigram.sum())
+    merge: list[tuple[int, int, int]] = []
+    for run, keys in enumerate(key_runs):
+        if keys.size:
+            heapq.heappush(merge, (int(keys[0]), run, 0))
+    strongest: list[tuple[float, int]] = []
+    while merge:
+        key, run, position = heapq.heappop(merge)
+        count = int(count_runs[run][position])
+        next_position = position + 1
+        if next_position < key_runs[run].size:
+            heapq.heappush(
+                merge, (int(key_runs[run][next_position]), run, next_position)
+            )
+        while merge and merge[0][0] == key:
+            _, other_run, other_position = heapq.heappop(merge)
+            count += int(count_runs[other_run][other_position])
+            other_next = other_position + 1
+            if other_next < key_runs[other_run].size:
+                heapq.heappush(
+                    merge,
+                    (int(key_runs[other_run][other_next]), other_run, other_next),
+                )
+        left, right = divmod(key, vocab_size)
+        if count < min_count or (
+            eligible is not None and not (eligible[left] and eligible[right])
+        ):
+            continue
+        pmi = math.log(count / total_pairs) - math.log(
+            unigram[left] / total_tokens * unigram[right] / total_tokens
+        )
+        if pmi < min_pmi:
+            continue
+        score = pmi if discount_k == 0 else pmi * count / (count + discount_k)
+        # Lower keys win exact score ties, matching stable ranking of the in-memory path.
+        candidate = (score, -key)
+        if len(strongest) < max_pairs:
+            heapq.heappush(strongest, candidate)
+        elif candidate > strongest[0]:
+            heapq.heapreplace(strongest, candidate)
+    return np.sort(np.asarray([-negative_key for _, negative_key in strongest], dtype=np.int64))
 
 
 @dataclass(frozen=True)

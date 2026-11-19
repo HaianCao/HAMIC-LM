@@ -233,6 +233,46 @@ def test_pmi_mining_and_units_join_collocations():
     assert row[4] != row[3]
 
 
+def test_discounted_pmi_prefers_well_supported_pair():
+    documents = [np.array([10, 11])] * 10 + [np.array([20, 21])] * 100
+    raw = mine_pmi_pairs(
+        documents, 30, special_ids=(), min_count=1, min_pmi=0.0, max_pairs=1
+    )
+    discounted = mine_pmi_pairs(
+        documents,
+        30,
+        special_ids=(),
+        min_count=1,
+        min_pmi=0.0,
+        max_pairs=1,
+        discount_k=100.0,
+    )
+    assert raw.tolist() == [10 * 30 + 11]
+    assert discounted.tolist() == [20 * 30 + 21]
+
+
+@pytest.mark.parametrize("discount_k", [0.0, 100.0])
+def test_spilled_pmi_matches_in_memory(tmp_path, discount_k):
+    rng = np.random.default_rng(7)
+    documents = [rng.integers(4, 80, 97) for _ in range(40)]
+    for document in documents:
+        document[20:22] = [90, 91]
+    options = {
+        "vocab_size": 100,
+        "special_ids": range(4),
+        "min_count": 3,
+        "min_pmi": 0.0,
+        "max_pairs": 75,
+        "discount_k": discount_k,
+    }
+    memory = mine_pmi_pairs(documents, **options)
+    spilled = mine_pmi_pairs(
+        documents, **options, scratch_dir=tmp_path / "scratch", chunk_tokens=211
+    )
+    assert spilled.tolist() == memory.tolist()
+    assert not any((tmp_path / "scratch").iterdir())
+
+
 def test_variant_table_lists_vietnamese_spellings():
     tokens = ["", " má", " mà", " ma", " mạ", " Ma", " không", " ko", "Hà", "Ha", " nhà"]
     table = VariantTable.from_vocabulary(tokens)
@@ -366,3 +406,13 @@ def test_pmi_units_keep_share_splits_some_collocations():
     assert 0.45 < joined < 0.55
     with pytest.raises(ValueError, match="keep"):
         PmiUnits(pairs, 600, range(37), keep=0.0)
+
+
+def test_pmi_units_cap_joined_chain_length():
+    vocab = 600
+    pairs = torch.tensor([token * vocab + token + 1 for token in range(100, 105)])
+    ids = torch.tensor([[100, 101, 102, 103, 104, 105]])
+    units = PmiUnits(pairs, vocab, (), max_length=2)(ids, torch.Generator())
+    assert units.tolist() == [[0, 0, 1, 1, 2, 2]]
+    with pytest.raises(ValueError, match="max_length"):
+        PmiUnits(pairs, vocab, (), max_length=1)

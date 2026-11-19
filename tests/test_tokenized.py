@@ -128,3 +128,49 @@ def test_publish_and_fetch_roundtrip(tmp_path, frozen_corpus, exported_tokenizer
     np.save(shard, np.zeros(3, dtype=np.uint16))
     fetch_tokenized(store, "tokenized/t/tok", local)
     TokenizedCorpus(local, verify=True)
+
+
+def test_sample_published_tokenized_roundtrips_to_text(
+    tmp_path, frozen_corpus, exported_tokenizers
+):
+    from hamic.checkpoint import LocalObjectStore
+    from hamic.data import publish_tokenized, read_jsonl, sample_published_tokenized
+
+    out = tmp_path / "tokens"
+    manifest = tokenize_corpus(
+        frozen_corpus, exported_tokenizers[TokenizerKind.ENCODER], out, shard_tokens=500
+    )
+    store = LocalObjectStore(tmp_path / "store")
+    prefix = "tokenized/t/tok"
+    publish_tokenized(out, store, prefix)
+    sample = sample_published_tokenized(
+        out,
+        store,
+        prefix,
+        tmp_path / "sample",
+        target_tokens=manifest["splits"]["train"]["tokens"] // 2,
+        source_weights={"s": 2.0},
+        shard_documents=5,
+        batch_size=3,
+    )
+    documents = [
+        document
+        for entry in sample["files"]
+        for document in read_jsonl(tmp_path / "sample" / entry["path"])
+    ]
+    assert sample["selection"]["roundtrip_checked"] is True
+    assert sample["selection"]["covered_tokens"] > 0
+    assert len(documents) == sample["documents"]
+    assert all(document.source_id == "s" for document in documents)
+    assert not any((tmp_path / "sample").glob("hamic-token-sample-*"))
+
+    explicit = sample_published_tokenized(
+        out,
+        store,
+        prefix,
+        tmp_path / "explicit",
+        target_tokens=1,
+        shard_indices=[0],
+    )
+    assert explicit["selection"]["method"] == "explicit-shard-indices-v1"
+    assert [item["index"] for item in explicit["selected_shards"]] == [0]
