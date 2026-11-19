@@ -1,0 +1,12 @@
+# Tokenizer-only proxy arm. Transformer shape is held constant across v0.12 candidates.
+name: HAMIC-E-proxy-m-v012-32k
+architecture: modernbert
+label_parameters: 5.4047e7
+label_tolerance: 0.03
+num_layers: 12
+hidden_size: 512
+num_heads: 8
+intermediate_size: 1344
+vocab_size: 32000
+max_position_embeddings: 1024
+rope_theta: 160000.0
