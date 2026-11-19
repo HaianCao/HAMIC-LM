@@ -247,6 +247,7 @@ def sample_published_tokenized(
     shard_documents: int = 50_000,
     batch_size: int = 256,
     shard_indices: Sequence[int] | None = None,
+    split: str = "train",
 ) -> dict[str, Any]:
     """Decode a distributed sample of published token shards back to cleaned text.
 
@@ -265,8 +266,9 @@ def sample_published_tokenized(
         source_weights: Repetition/thinning weight per recorded source id.
         shard_documents: Documents per decoded output shard.
         batch_size: Documents decoded and round-trip checked together.
-        shard_indices: Exact train-shard indices to decode. ``None`` selects evenly spaced
+        shard_indices: Exact split-shard indices to decode. ``None`` selects evenly spaced
             quantiles from ``target_tokens``. This supports explicit source-coverage shards.
+        split: Published corpus split to sample (``train``, ``validation`` or ``test``).
 
     Returns:
         The sample manifest written after every selected shard passes round-trip checks.
@@ -288,10 +290,12 @@ def sample_published_tokenized(
     remote_files: dict[str, str] = (
         json.loads(remote_path.read_text(encoding="utf-8")) if remote_path.is_file() else {}
     )
-    shards = manifest["splits"]["train"]["shards"]
+    if split not in {"train", "validation", "test"}:
+        raise ValueError("split must be train, validation or test")
+    shards = manifest["splits"][split]["shards"]
     total_tokens = sum(int(shard["tokens"]) for shard in shards)
     if not shards or total_tokens < 1:
-        raise ValueError("tokenized corpus contains no train shards")
+        raise ValueError(f"tokenized corpus contains no {split} shards")
     if shard_indices is None:
         average = total_tokens / len(shards)
         shard_count = min(len(shards), max(1, math.ceil(target_tokens / average)))
@@ -307,7 +311,7 @@ def sample_published_tokenized(
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(f"{output} is not empty")
     output.mkdir(parents=True, exist_ok=True)
-    writer = _SampleWriter(output / "train", shard_documents)
+    writer = _SampleWriter(output / split, shard_documents)
     tokenizer = Tokenizer.from_file(str(tokenizer_path))
     source_ids = list(manifest.get("source_ids") or [])
     source_counts: dict[str, int] = {}
@@ -329,7 +333,7 @@ def sample_published_tokenized(
                     if kind == "sources":
                         continue
                     raise ValueError(f"shard {shard['name']} has no {kind} file")
-                relative = f"train/{files[kind]['path']}"
+                relative = f"{split}/{files[kind]['path']}"
                 remote = _remote_path(relative, prefix, remote_files)
                 destination = staging / files[kind]["path"]
                 store.download(remote, destination)
@@ -364,7 +368,7 @@ def sample_published_tokenized(
                         if sources is not None and source_ids
                         else "unknown"
                     )
-                    identity = f"{shard['name']}:{offset}"
+                    identity = f"{split}:{shard['name']}:{offset}"
                     copies = _weighted_copies(weights.get(source, 1.0), seed, identity)
                     for copy in range(copies):
                         writer.write(
@@ -401,7 +405,7 @@ def sample_published_tokenized(
         "schema_version": 1,
         "created_at_utc": utc_now(),
         "format": "hamic-decoded-token-sample-v1",
-        "split": "train",
+        "split": split,
         "selection": {
             "method": selection_method,
             "seed": seed,

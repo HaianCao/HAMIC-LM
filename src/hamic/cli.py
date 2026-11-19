@@ -240,6 +240,7 @@ def _cmd_corpus_sample_tokenized(args: argparse.Namespace) -> int:
         shard_documents=args.shard_documents,
         batch_size=args.batch_size,
         shard_indices=args.shard_index or None,
+        split=args.split,
     )
     _print_json(
         {
@@ -486,11 +487,14 @@ def _parser() -> argparse.ArgumentParser:
     sample_tokens.add_argument("--shard-documents", type=int, default=50_000)
     sample_tokens.add_argument("--batch-size", type=int, default=256)
     sample_tokens.add_argument(
+        "--split", choices=["train", "validation", "test"], default="train"
+    )
+    sample_tokens.add_argument(
         "--shard-index",
         action="append",
         type=int,
         default=[],
-        help="decode this exact train-shard index instead of quantiles (repeatable)",
+        help="decode this exact split-shard index instead of quantiles (repeatable)",
     )
     sample_tokens.set_defaults(func=_cmd_corpus_sample_tokenized)
 

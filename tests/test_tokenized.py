@@ -174,3 +174,14 @@ def test_sample_published_tokenized_roundtrips_to_text(
     )
     assert explicit["selection"]["method"] == "explicit-shard-indices-v1"
     assert [item["index"] for item in explicit["selected_shards"]] == [0]
+
+    heldout = sample_published_tokenized(
+        out,
+        store,
+        prefix,
+        tmp_path / "heldout",
+        target_tokens=1,
+        shard_indices=[0],
+        split="validation",
+    )
+    assert heldout["split"] == "validation"
