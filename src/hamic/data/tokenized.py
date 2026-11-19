@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import shutil
 import warnings
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -41,6 +41,7 @@ __all__ = [
     "fetch_tokenized",
     "publish_tokenized",
     "tokenize_corpus",
+    "tokenize_samples",
 ]
 
 MANIFEST_NAME = "tokenized_manifest.json"
@@ -217,6 +218,97 @@ def tokenize_corpus(
         "source_corpus": {
             "corpus_version": source_manifest.get("corpus_version"),
             "manifest_sha256": file_sha256(source_manifest_path),
+        },
+        "source_ids": source_ids,
+        "splits": splits,
+        "code": code_revision(),
+    }
+    out.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(tokenizer_file, out / TOKENIZER_NAME)
+    _write_manifest(out, manifest)
+    return manifest
+
+
+def tokenize_samples(
+    sample_dirs: Sequence[str | Path],
+    tokenizer_dir: str | Path,
+    output_dir: str | Path,
+    *,
+    shard_tokens: int = 50_000_000,
+    batch_size: int = 256,
+) -> dict[str, Any]:
+    """Tokenize one or more verified decoded-sample directories.
+
+    Each input must contain ``sample_manifest.json``. Its declared split is
+    preserved, allowing independent train and held-out samples to be combined
+    without copying their compressed JSONL payloads.
+    """
+    from tokenizers import Tokenizer
+
+    samples: list[tuple[Path, dict[str, Any]]] = []
+    source_ids: list[str] = []
+    for value in sample_dirs:
+        root = Path(value)
+        path = root / "sample_manifest.json"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        split = str(manifest["split"])
+        if split not in SPLITS:
+            raise ValueError(f"invalid sample split: {split}")
+        for source_id in manifest.get("sources", {}):
+            if source_id not in source_ids:
+                source_ids.append(source_id)
+        samples.append((root, manifest))
+    if not samples:
+        raise ValueError("at least one sample directory is required")
+
+    tokenizer_file = Path(tokenizer_dir) / TOKENIZER_NAME
+    tokenizer = Tokenizer.from_file(str(tokenizer_file))
+    vocab_size = int(tokenizer.get_vocab_size())
+    dtype = _dtype_for(vocab_size)
+    source_index = {source_id: i for i, source_id in enumerate(source_ids)}
+    out = Path(output_dir)
+    if (out / MANIFEST_NAME).exists():
+        raise FileExistsError(f"{out} already contains tokenized shards")
+
+    splits: dict[str, Any] = {}
+    for split in SPLITS:
+        sink = _ShardSink(out / split, split, dtype, shard_tokens)
+        documents = (
+            (document.text, document.source_id)
+            for root, manifest in samples
+            if manifest["split"] == split
+            for entry in manifest["files"]
+            for document in read_jsonl(root / entry["path"])
+        )
+        for batch in _batched(documents, batch_size):
+            encodings = tokenizer.encode_batch(
+                [text for text, _ in batch], add_special_tokens=False
+            )
+            for encoding, (_, source_id) in zip(encodings, batch, strict=True):
+                sink.add(encoding.ids, source_index[source_id])
+        sink.flush()
+        splits[split] = {
+            "documents": sum(item["documents"] for item in sink.shards),
+            "tokens": sum(item["tokens"] for item in sink.shards),
+            "shards": sink.shards,
+        }
+
+    metadata_file = Path(tokenizer_dir) / "hamic_tokenizer.json"
+    tokenizer_name = json.loads(metadata_file.read_text(encoding="utf-8"))["spec"]["name"]
+    manifest = {
+        "schema_version": 1,
+        "created_at_utc": utc_now(),
+        "format": "hamic-tokenized-npy-v1",
+        "special_tokens_added": False,
+        "dtype": dtype.name,
+        "tokenizer": {
+            "name": tokenizer_name,
+            "vocab_size": vocab_size,
+            "sha256": file_sha256(tokenizer_file),
+        },
+        "source_corpus": {
+            "corpus_version": "decoded-samples",
+            "samples": [file_sha256(root / "sample_manifest.json") for root, _ in samples],
         },
         "source_ids": source_ids,
         "splits": splits,

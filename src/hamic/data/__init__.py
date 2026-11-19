@@ -39,6 +39,7 @@ from hamic.data.tokenized import (
     fetch_tokenized,
     publish_tokenized,
     tokenize_corpus,
+    tokenize_samples,
 )
 
 __all__ = [
@@ -80,5 +81,6 @@ __all__ = [
     "sample_published_tokenized",
     "shuffled_files",
     "tokenize_corpus",
+    "tokenize_samples",
     "write_jsonl",
 ]

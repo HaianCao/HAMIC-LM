@@ -160,6 +160,24 @@ def _cmd_corpus_tokenize(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_corpus_tokenize_samples(args: argparse.Namespace) -> int:
+    from hamic.data import tokenize_samples
+
+    manifest = tokenize_samples(
+        args.sample, args.tokenizer, args.out, shard_tokens=args.shard_tokens
+    )
+    _print_json(
+        {
+            "tokenizer": manifest["tokenizer"]["name"],
+            "splits": {
+                key: {"documents": value["documents"], "tokens": value["tokens"]}
+                for key, value in manifest["splits"].items()
+            },
+        }
+    )
+    return 0
+
+
 def _default_prefix(directory: str) -> str:
     path = Path(directory).resolve()
     return f"tokenized/{path.parent.name}/{path.name}"
@@ -402,6 +420,15 @@ def _parser() -> argparse.ArgumentParser:
     tokenize.add_argument("--out", required=True)
     tokenize.add_argument("--shard-tokens", type=int, default=50_000_000)
     tokenize.set_defaults(func=_cmd_corpus_tokenize)
+
+    tokenize_sample = corpus.add_parser(
+        "tokenize-samples", help="tokenize verified decoded sample manifests"
+    )
+    tokenize_sample.add_argument("--sample", nargs="+", required=True)
+    tokenize_sample.add_argument("--tokenizer", required=True)
+    tokenize_sample.add_argument("--out", required=True)
+    tokenize_sample.add_argument("--shard-tokens", type=int, default=50_000_000)
+    tokenize_sample.set_defaults(func=_cmd_corpus_tokenize_samples)
 
     store_help = "local:<dir>, hf:<namespace/repo> or hf-dataset:<namespace/repo>"
     prefix_help = "remote prefix (default: tokenized/<parent dir>/<dir>)"
