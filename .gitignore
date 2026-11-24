@@ -27,6 +27,7 @@
 !/docs/architecture/model-specifications.md
 !/docs/architecture/naming-and-model-family.md
 !/docs/architecture/component-walkthrough.md
+!/docs/architecture/corpus-expansion-dedup-and-scaling.md
 
 # Never commit these, even inside allowed folders.
 __pycache__/

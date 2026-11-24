@@ -1,0 +1,19 @@
+# Corpus v0.7 delta: files of v0.7 in configs/sources/fineweb2-vie-order.yaml
+# (~5.60M rows). Built against the dedup index of every version up
+# to v0.6, so only documents new to all of them are kept.
+sources:
+- type: huggingface
+  source_id: fineweb2-vie-latn
+  dataset: HuggingFaceFW/fineweb-2
+  config: vie_Latn
+  revision: af9c13333eb981300149d5ca60a8e9d659b276b9
+  text_field: text
+  id_field: id
+  meta_fields:
+  - url
+  - date
+  data_files:
+  - data/vie_Latn/train/000_00003.parquet
+  - data/vie_Latn/train/004_00004.parquet
+  - data/vie_Latn/train/001_00000.parquet
+  download_dir: data/raw/fineweb2   # download first (resumable), then build offline

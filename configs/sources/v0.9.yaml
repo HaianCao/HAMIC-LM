@@ -1,0 +1,17 @@
+# Corpus v0.9 delta: files of v0.9 in fineweb2-vie-order.yaml.
+sources:
+- type: huggingface
+  source_id: fineweb2-vie-latn
+  dataset: HuggingFaceFW/fineweb-2
+  config: vie_Latn
+  revision: af9c13333eb981300149d5ca60a8e9d659b276b9
+  text_field: text
+  id_field: id
+  meta_fields:
+  - url
+  - date
+  data_files:
+  - data/vie_Latn/train/001_00005.parquet
+  - data/vie_Latn/train/004_00000.parquet
+  - data/vie_Latn/train/001_00004.parquet
+  download_dir: data/raw/fineweb2

@@ -12,6 +12,10 @@
 | Extra Large | `HAMIC-EXL` | Chưa khóa | `hamic-exl-*` |
 | Extra Extra Large | `HAMIC-EXXL` | Chưa khóa | `hamic-exxl-*` |
 
+Các mốc quy hoạch khoảng 700M/1,5B/3B chỉ dùng để tính data/compute trong
+[kế hoạch mở rộng corpus và scaling](corpus-expansion-dedup-and-scaling.md);
+chúng không thay trạng thái “chưa khóa” của topology EL/EXL/EXXL.
+
 `E` nghĩa là bidirectional encoder; `S/M/L/XL/XXL` là size. `M` trong `EM`
 nghĩa là **Medium**, không còn là hậu tố “modern candidate”. Kiến trúc thực
 (`modernbert`, `roberta`, ...) nằm trong config và manifest.

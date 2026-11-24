@@ -338,6 +338,11 @@ Kiến trúc chỉ là cái khung; model giỏi tiếng Việt hay không do **d
 
 ### 11.1. Nguồn
 
+Quy mô, license gate, cross-source dedup, các nguồn HPLT/MADLAD/CulturaX và hàm ý
+model scaling được tập trung trong
+[kế hoạch mở rộng corpus, dedup và scaling](corpus-expansion-dedup-and-scaling.md).
+Tài liệu đó hiện là thiết kế, không phải phê duyệt ingest.
+
 - Dữ liệu nhóm sở hữu hoặc được cấp quyền (ưu tiên cao nhất).
 - Wikipedia/Wikisource tiếng Việt.
 - FineWeb2 phần tiếng Việt, CulturaX tiếng Việt (sau khi kiểm tra quyền và nội dung).

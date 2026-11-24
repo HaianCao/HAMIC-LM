@@ -38,6 +38,11 @@ Training v0.5:
 - `configs/train/es/hamic-es-v05.yaml`
 - `configs/train/em/hamic-em-v05.yaml`
 
+Ước tính corpus đến v0.12, token/parameter, compute và target quy hoạch cho
+`EL`/`EXL`/`EXXL` nằm trong
+[kế hoạch mở rộng corpus, dedup và scaling](corpus-expansion-dedup-and-scaling.md).
+Các target lớn hơn EM trong tài liệu đó chưa khóa topology.
+
 **Trạng thái:** reference profile + research-informed candidate; config release chưa khóa, số tham số phải được xác nhận khi khởi tạo runtime  
 **Precision mục tiêu:** BF16 training, weight export theo policy phát hành
 
