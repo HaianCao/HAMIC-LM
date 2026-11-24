@@ -1,11 +1,13 @@
 """Corpus governance and cleaning."""
 
-from hamic.data.config import NearDedupConfig, PipelineConfig
+from hamic.data.config import ContaminationConfig, NearDedupConfig, PipelineConfig
+from hamic.data.contamination import BenchmarkIndex
 from hamic.data.dedup_index import DedupIndex
 from hamic.data.delta import assemble_tokenized, index_corpus, shuffled_files
 from hamic.data.documents import (
     Document,
     DocumentSource,
+    GroupedSource,
     HuggingFaceStreamSource,
     JsonlSource,
     read_jsonl,
@@ -44,12 +46,15 @@ from hamic.data.tokenized import (
 
 __all__ = [
     "SAMPLE_MANIFEST",
+    "BenchmarkIndex",
+    "ContaminationConfig",
     "ContaminationFilterStage",
     "CorpusPipeline",
     "DedupIndex",
     "Document",
     "DocumentSource",
     "ExactDedupStage",
+    "GroupedSource",
     "HuggingFaceStreamSource",
     "JsonlSource",
     "NearDedupConfig",

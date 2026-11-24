@@ -22,6 +22,7 @@ from hamic.data.documents import Document
 from hamic.text.normalization import VietnameseNormalizer
 
 if TYPE_CHECKING:
+    from hamic.data.contamination import BenchmarkIndex
     from hamic.data.dedup_index import DedupIndex
 
 __all__ = [
@@ -44,6 +45,9 @@ __all__ = [
 _SYLLABLE = re.compile(r"[\w]+", flags=re.UNICODE)
 _LETTER = re.compile(r"[^\W\d_]")
 _WHITESPACE = re.compile(r"\s")
+# Latin-1 characters that never occur in Vietnamese but fill text extracted from PDFs set in
+# pre-Unicode Vietnamese fonts: VNI ("Chuùa nhaät", "ñöôïc"), TCVN3/ABC ("Céng hßa x· héi").
+_LEGACY_FONT = re.compile(r"[øöñïäëüÿßµ¸¶·¹¨©ª®¬¤¦±²³»¼½¾ÇÐÆåæðþ]")
 
 
 def _marked_letter_class() -> str:
@@ -218,6 +222,11 @@ class QualityFilterConfig:
     min_mean_syllable_chars: float = 1.5
     max_mean_syllable_chars: float = 8.0
     max_duplicate_line_ratio: float = 0.3
+    max_legacy_font_share: float | None = None
+    """Reject a document when more than this share of its syllables contains a character
+    of pre-Unicode Vietnamese-font mojibake (VNI, TCVN3); ``None`` disables the rule.
+    2.9% of FinePDFs ``vie_Latn`` documents exceed 0.05; FineWeb-2 and the other v0.13
+    sources had none in a 17K-document trial."""
 
 
 class QualityFilterStage(Stage):
@@ -256,6 +265,10 @@ class QualityFilterStage(Stage):
             duplicates = len(lines) - len(set(lines))
             if duplicates / len(lines) > cfg.max_duplicate_line_ratio:
                 return "repeated_lines"
+        if cfg.max_legacy_font_share is not None:
+            legacy = sum(1 for s in syllables if _LEGACY_FONT.search(s))
+            if legacy / len(syllables) > cfg.max_legacy_font_share:
+                return "legacy_font_mojibake"
         marked = sum(1 for s in syllables if _MARKED.search(s))
         return document.with_meta(vi_mark_ratio=round(marked / len(syllables), 4))
 
@@ -375,23 +388,23 @@ class IndexedNearDedupStage(NearDedupStage):
 
 
 class ContaminationFilterStage(Stage):
-    """Drop documents sharing a long n-gram with any benchmark text."""
+    """Drop documents that repeat benchmark text (see :mod:`hamic.data.contamination`).
+
+    Stateless, so it runs in the worker processes right after the quality filter. A
+    rejected document therefore never enters the dedup index; the kept set is the same as
+    with the stage after dedup.
+    """
 
     name = "contamination"
+    parallel_safe = True
 
-    def __init__(self, benchmark_texts: Iterable[str], ngram: int = 13, **kwargs: int) -> None:
+    def __init__(self, index: BenchmarkIndex, **kwargs: int) -> None:
         super().__init__(**kwargs)
-        self.ngram = ngram
-        self._index = {g for text in benchmark_texts for g in self._ngrams(text)}
-
-    def _ngrams(self, text: str) -> set[str]:
-        tokens = _SYLLABLE.findall(unicodedata.normalize("NFC", text).lower())
-        n = self.ngram
-        return {" ".join(tokens[i : i + n]) for i in range(len(tokens) - n + 1)}
+        self.index = index
 
     def process(self, document: Document) -> Document | str:
-        """Reject on any shared n-gram."""
-        if self._index and not self._index.isdisjoint(self._ngrams(document.text)):
+        """Reject a document that equals or shares an n-gram with a benchmark text."""
+        if self.index.matches(document.text):
             return "benchmark_overlap"
         return document
 

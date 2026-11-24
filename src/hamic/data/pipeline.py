@@ -24,6 +24,24 @@ SPLITS = ("train", "validation", "test")
 MANIFEST_NAME = "manifest.json"
 
 
+def _describe(source: Any) -> dict[str, Any]:
+    """How a source was read (fields, files, transform, grouping and its row counts)."""
+    from dataclasses import asdict, is_dataclass
+
+    from hamic.data.documents import GroupedSource
+
+    if isinstance(source, GroupedSource):
+        return {
+            "group": {"target_chars": source.target_chars, "separator": source.separator},
+            "counts": dict(source.counts),
+            "inner": _describe(source.inner),
+        }
+    if is_dataclass(source) and not isinstance(source, type):
+        described: dict[str, Any] = json.loads(json.dumps(asdict(source), default=str))
+        return described
+    return {"type": type(source).__name__}
+
+
 def default_stages() -> list[Stage]:
     """Return the canonical stage order with default settings."""
     return PipelineConfig().build_stages()
@@ -181,8 +199,9 @@ class CorpusPipeline:
                     "revision": r.revision,
                     "license": r.license,
                     "status": r.status.value,
+                    "reader": _describe(source),
                 }
-                for r in records
+                for r, source in zip(records, source_list, strict=True)
             ],
             "stages": [{"name": s.name, **s.stats.to_dict()} for s in self.stages],
             "base_corpus": self.base_corpus,

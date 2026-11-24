@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from hamic.data.stages import (
+    ContaminationFilterStage,
     ExactDedupStage,
     IndexedExactDedupStage,
     IndexedNearDedupStage,
@@ -31,7 +32,7 @@ from hamic.text.normalization import NormalizationConfig, VietnameseNormalizer
 if TYPE_CHECKING:
     from hamic.data.dedup_index import DedupIndex
 
-__all__ = ["NearDedupConfig", "PipelineConfig"]
+__all__ = ["ContaminationConfig", "NearDedupConfig", "PipelineConfig"]
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,27 @@ class NearDedupConfig:
     threshold: float = 0.8
     num_perm: int = 128
     shingle_size: int = 5
+
+
+@dataclass(frozen=True)
+class ContaminationConfig:
+    """Benchmark contamination removal (:mod:`hamic.data.contamination`).
+
+    Attributes:
+        benchmarks: File written by ``hamic corpus benchmark-texts``.
+        sha256: Its checksum; the build refuses another file, so the manifest pins the
+            exact benchmark texts.
+        ngram: Syllable run compared between documents and benchmark texts.
+        splits: Benchmark splits checked (train text is not evaluation data).
+        min_coverage: A document is contaminated when it contains at least this share of
+            the n-grams of one benchmark text (or equals it).
+    """
+
+    benchmarks: str
+    sha256: str
+    ngram: int = 13
+    splits: tuple[str, ...] = ("dev", "test")
+    min_coverage: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -55,6 +77,8 @@ class PipelineConfig:
         near_dedup: MinHash-LSH settings.
         split: Train/validation/test fractions and seed.
         shard_docs: Documents per output shard.
+        contamination: Drop documents repeating downstream benchmark text (``None``:
+            off; left out of the hash, so older configurations keep theirs).
     """
 
     name: str = "default"
@@ -64,6 +88,7 @@ class PipelineConfig:
     near_dedup: NearDedupConfig = field(default_factory=NearDedupConfig)
     split: SplitConfig = field(default_factory=SplitConfig)
     shard_docs: int = 50_000
+    contamination: ContaminationConfig | None = None
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> PipelineConfig:
@@ -75,10 +100,16 @@ class PipelineConfig:
             "quality": QualityFilterConfig,
             "near_dedup": NearDedupConfig,
             "split": SplitConfig,
+            "contamination": ContaminationConfig,
         }
         for key, kind in sections.items():
             if key in values:
                 values[key] = kind(**(values[key] or {}))
+        contamination = values.get("contamination")
+        if contamination is not None and not isinstance(contamination.splits, tuple):
+            values["contamination"] = ContaminationConfig(
+                **{**asdict(contamination), "splits": tuple(contamination.splits)}
+            )
         return cls(**values)
 
     @classmethod
@@ -89,7 +120,14 @@ class PipelineConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-friendly view."""
-        return asdict(self)
+        data = asdict(self)
+        # Options added after v0.12 stay out of the hash while unused, so earlier
+        # configurations keep their hash.
+        if data["contamination"] is None:
+            del data["contamination"]
+        if data["quality"]["max_legacy_font_share"] is None:
+            del data["quality"]["max_legacy_font_share"]
+        return data
 
     def sha256(self) -> str:
         """Hash of the configuration (independent of file formatting)."""
@@ -107,6 +145,8 @@ class PipelineConfig:
         if self.pii_filter:
             stages.append(PiiFilterStage())
         stages.append(QualityFilterStage(self.quality))
+        if self.contamination is not None:
+            stages.append(ContaminationFilterStage(self._benchmark_index()))
         if dedup_index is not None:
             expected = (self.near_dedup.num_perm, self.near_dedup.shingle_size)
             if (dedup_index.num_perm, dedup_index.shingle_size) != expected:
@@ -123,3 +163,18 @@ class PipelineConfig:
             ]
         stages.append(SplitStage(self.split))
         return stages
+
+    def _benchmark_index(self) -> Any:
+        from hamic.data.contamination import BenchmarkIndex
+        from hamic.provenance import file_sha256
+
+        assert self.contamination is not None
+        path = Path(self.contamination.benchmarks)
+        if file_sha256(path) != self.contamination.sha256:
+            raise ValueError(f"{path} does not match contamination.sha256")
+        return BenchmarkIndex.from_file(
+            path,
+            self.contamination.ngram,
+            splits=self.contamination.splits,
+            min_coverage=self.contamination.min_coverage,
+        )

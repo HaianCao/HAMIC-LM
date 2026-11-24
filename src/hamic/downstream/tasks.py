@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import ast
 import hashlib
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["TASKS", "TaskData", "TaskSpec", "load_task"]
+__all__ = ["TASKS", "TaskData", "TaskSpec", "load_task", "task_texts"]
 
 
 @dataclass(frozen=True)
@@ -286,3 +287,26 @@ def _qa_row(row: dict[str, Any]) -> dict[str, Any]:
         "question": str(row["question"]),
         "answers": [{"text": t, "start": s} for t, s in zip(texts, starts, strict=True)],
     }
+
+
+def task_texts(data: TaskData) -> Iterator[tuple[str, str]]:
+    """``(split, text)`` for every text a model sees in any split of a task.
+
+    Token tasks give their tokens joined by spaces, QA tasks their contexts (once per
+    split) and questions, pair tasks both sentences. Used to remove benchmark text from
+    pretraining corpora (:mod:`hamic.data.contamination`).
+    """
+    for role, rows in data.splits.items():
+        contexts: set[str] = set()
+        for row in rows:
+            if data.spec.kind == "token":
+                yield role, " ".join(row["tokens"])
+            elif data.spec.kind == "qa":
+                if row["context"] not in contexts:
+                    contexts.add(row["context"])
+                    yield role, row["context"]
+                yield role, row["question"]
+            else:
+                yield role, row["text"]
+                if row.get("text_b"):
+                    yield role, row["text_b"]

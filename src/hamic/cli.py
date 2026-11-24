@@ -54,9 +54,14 @@ def _cmd_params(args: argparse.Namespace) -> int:
     return 0 if all(r["within_label"] for r in reports) else 1
 
 
-def _build_source(item: dict[str, Any]) -> Any:
-    from hamic.data import HuggingFaceStreamSource, JsonlSource
+def _build_source(item: dict[str, Any], exclude: Any = None) -> Any:
+    from hamic.data import GroupedSource, HuggingFaceStreamSource, JsonlSource
 
+    group = item.pop("group", None)
+    if group is not None:
+        if exclude is None:
+            raise SystemExit("A grouped source needs `contamination` in the pipeline config")
+        return GroupedSource(_build_source(item), exclude=exclude, **group)
     kind = item.pop("type")
     if kind == "huggingface":
         item["meta_fields"] = tuple(item.get("meta_fields", ("url", "title")))
@@ -93,12 +98,45 @@ def _cmd_corpus_build(args: argparse.Namespace) -> int:
     pipeline = CorpusPipeline(
         registry, workers=args.workers, config=config, dedup_index=index, base_corpus=base
     )
+    exclude = None
+    if config is not None and config.contamination is not None:
+        from hamic.data import BenchmarkIndex
+
+        # Rows of grouped (social-media) sources are short: exact match and 8-grams.
+        exclude = BenchmarkIndex.from_file(config.contamination.benchmarks, ngram=8)
     result = pipeline.run(
-        [_build_source(dict(item)) for item in source_items], args.out, args.version
+        [_build_source(dict(item), exclude) for item in source_items], args.out, args.version
     )
     if index is not None:
         index.save(args.dedup_index, version=args.version)
     _print_json({"output": str(result.output_dir), "documents": result.counts})
+    return 0
+
+
+def _cmd_corpus_benchmark_texts(args: argparse.Namespace) -> int:
+    import gzip
+    import io
+
+    from hamic.downstream import TASKS, load_task
+    from hamic.downstream.tasks import task_texts
+    from hamic.provenance import file_sha256
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    counts: dict[str, int] = {}
+    seen: set[str] = set()
+    raw = gzip.GzipFile(filename=str(out), mode="wb", mtime=0)
+    with io.TextIOWrapper(raw, encoding="utf-8") as stream:
+        for name in sorted(TASKS):
+            data = load_task(TASKS[name], cache_dir=args.cache_dir)
+            for split, text in task_texts(data):
+                if not text.strip() or text in seen:
+                    continue
+                seen.add(text)
+                row = {"task": name, "split": split, "text": text}
+                stream.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+                counts[name] = counts.get(name, 0) + 1
+    _print_json({"out": str(out), "texts": counts, "sha256": file_sha256(out)})
     return 0
 
 
@@ -442,6 +480,13 @@ def _parser() -> argparse.ArgumentParser:
         "server instead of uploaded",
     )
     push.set_defaults(func=_cmd_corpus_push)
+
+    texts = corpus.add_parser(
+        "benchmark-texts", help="write every downstream task text (contamination removal)"
+    )
+    texts.add_argument("--out", required=True, help="output .jsonl.gz")
+    texts.add_argument("--cache-dir", default="data/downstream-cache")
+    texts.set_defaults(func=_cmd_corpus_benchmark_texts)
 
     index = corpus.add_parser("index", help="add a frozen corpus to a persistent dedup index")
     index.add_argument("--corpus", required=True, help="frozen corpus directory")
