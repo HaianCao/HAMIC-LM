@@ -250,7 +250,14 @@ def test_shipped_train_configs_are_valid(path):
     assert parameter_report(preset).within_label
     assert config.objective == ("mlm" if preset.family.value == "encoder" else "clm")
     assert config.seq_len <= preset.max_position_embeddings
-    vocab_of = {"t1-bbpe-20544": 20544, "t2-bbpe-32k": 32000}
+    vocab_of = {
+        "t1-bbpe-20544": 20544,
+        "t1b-bbpe-20544": 20544,
+        "t2-bbpe-32k": 32000,
+        "v012-bbpe-32k": 32000,
+        "v012-bbpe-48k": 48000,
+        "v012-bbpe-64k": 64000,
+    }
     assert preset.vocab_size == vocab_of[Path(config.tokenized).name]
 
 

@@ -145,6 +145,13 @@ def _batched(
         yield batch
 
 
+def _text_preparation() -> dict[str, Any]:
+    """Manifest record of :func:`hamic.tokenization.prepare_text` (its look-alike table)."""
+    from hamic.text.lookalikes import lookalike_identity
+
+    return {"lookalikes": lookalike_identity()}
+
+
 def tokenize_corpus(
     corpus_dir: str | Path,
     tokenizer_dir: str | Path,
@@ -178,6 +185,8 @@ def tokenize_corpus(
 
     tokenizer_file = Path(tokenizer_dir) / "tokenizer.json"
     tokenizer = Tokenizer.from_file(str(tokenizer_file))
+    from hamic.tokenization import prepare_text
+
     vocab_size = int(tokenizer.get_vocab_size())
     dtype = _dtype_for(vocab_size)
     source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
@@ -188,7 +197,9 @@ def tokenize_corpus(
     for split in SPLITS:
         sink = _ShardSink(out / split, split, dtype, shard_tokens)
         for batch in _batched(_split_documents(corpus, source_manifest, split), batch_size):
-            encodings = tokenizer.encode_batch([t for t, _ in batch], add_special_tokens=False)
+            encodings = tokenizer.encode_batch(
+                [prepare_text(t) for t, _ in batch], add_special_tokens=False
+            )
             for encoding, (_, source_id) in zip(encodings, batch, strict=True):
                 sink.add(encoding.ids, source_index[source_id])
         sink.flush()
@@ -214,6 +225,7 @@ def tokenize_corpus(
             "name": tokenizer_name,
             "vocab_size": vocab_size,
             "sha256": file_sha256(tokenizer_file),
+            "text_preparation": _text_preparation(),
         },
         "source_corpus": {
             "corpus_version": source_manifest.get("corpus_version"),
@@ -263,6 +275,8 @@ def tokenize_samples(
 
     tokenizer_file = Path(tokenizer_dir) / TOKENIZER_NAME
     tokenizer = Tokenizer.from_file(str(tokenizer_file))
+    from hamic.tokenization import prepare_text
+
     vocab_size = int(tokenizer.get_vocab_size())
     dtype = _dtype_for(vocab_size)
     source_index = {source_id: i for i, source_id in enumerate(source_ids)}
@@ -282,7 +296,7 @@ def tokenize_samples(
         )
         for batch in _batched(documents, batch_size):
             encodings = tokenizer.encode_batch(
-                [text for text, _ in batch], add_special_tokens=False
+                [prepare_text(text) for text, _ in batch], add_special_tokens=False
             )
             for encoding, (_, source_id) in zip(encodings, batch, strict=True):
                 sink.add(encoding.ids, source_index[source_id])
@@ -305,6 +319,7 @@ def tokenize_samples(
             "name": tokenizer_name,
             "vocab_size": vocab_size,
             "sha256": file_sha256(tokenizer_file),
+            "text_preparation": _text_preparation(),
         },
         "source_corpus": {
             "corpus_version": "decoded-samples",
@@ -441,12 +456,18 @@ class TokenizedCorpus:
         tokenizers. Reads the ``tokenizer.json`` copy stored with the shards and checks it
         against the manifest hash.
 
+        HAMIC tokenizers count their virtual spaces (prefix space, after openers) as bytes
+        (0.41% of the bytes of v0.12 held-out text plus one per document), so their bits per
+        byte read about 0.4% low against a tokenizer without virtual spaces.
+
         Raises:
             FileNotFoundError: The directory has no tokenizer copy.
             ValueError: The copy does not match the manifest, or is not byte-level BPE.
         """
         data = json.loads(self.tokenizer_file().read_text(encoding="utf-8"))
-        if data.get("decoder", {}).get("type") != "ByteLevel":
+        decoder = data.get("decoder") or {}
+        kinds = {d.get("type") for d in decoder.get("decoders", [])} | {decoder.get("type")}
+        if "ByteLevel" not in kinds:
             raise ValueError("Byte lengths need a byte-level tokenizer")
         lengths = np.zeros(self.vocab_size, dtype=np.int64)
         for token, index in data["model"]["vocab"].items():

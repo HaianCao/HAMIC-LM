@@ -21,7 +21,7 @@ VIETNAMESE_SENTENCES = [
     "Hoà bình và hòa bình là hai cách đặt dấu đều được dùng.",
 ]
 
-TINY_VOCAB = 640
+TINY_VOCAB = 3000
 
 
 @pytest.fixture(scope="session")
@@ -31,7 +31,9 @@ def corpus() -> list[str]:
 
 @pytest.fixture(scope="session")
 def tiny_spec() -> TokenizerSpec:
-    return TokenizerSpec(name="test-bbpe", vocab_size=TINY_VOCAB, min_frequency=1)
+    return TokenizerSpec(
+        name="test-bbpe", vocab_size=TINY_VOCAB, min_frequency=1, required_count=200
+    )
 
 
 @pytest.fixture(scope="session")

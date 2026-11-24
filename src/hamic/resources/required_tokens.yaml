@@ -1,0 +1,68 @@
+# Strings that HAMIC tokenizers with `required_strings: required_tokens.yaml` learn as
+# single tokens (alone and after a space). Each is boosted in the BPE training text, so the
+# tokenizer stays an ordinary byte-level BPE at inference. Entries are normalized like
+# tokenizer input before use (NFKC, variation selectors removed), then deduplicated.
+#
+# Selection (version 3, 22/11/2026):
+# - corpus_emoji: the most frequent emoji and symbols in 667M characters of the v0.12
+#   tokenizer sample (FineWeb-2 + Wikipedia), where emoji are mostly decorative (✔ 14,956,
+#   ✅ 2,370, ⭐ 1,110, 👉 784 occurrences);
+# - social_emoji: emoji common in social-media comments, rare in web text but present in
+#   19% of VSMEC and 14% of ViHSD test sentences. Chosen from general emoji usage rankings,
+#   not from benchmark data (benchmarks are only used to measure coverage);
+# - modifiers: skin tones and gender signs. Zero-width joiners are removed by the corpus
+#   normalizer, so "🤦‍♀️" reaches the tokenizer as "🤦" + "♀";
+# - emoticons: punctuation-only emoticons, which byte-level pre-tokenization keeps in one
+#   piece. Emoticons that mix letters or digits (":v", ":D", ":3", "<3") are split by the
+#   pre-tokenizer and cannot become one token.
+#
+# characters (version 3): every Vietnamese letter with a diacritic, learned bare (no
+# space form), so the letter itself always exists as a token. BPE had
+# learned 96 of the 134 only inside syllables ("ại", "ược"); rare, misspelt and ALL-CAPS
+# syllables ("Ủ" 58,583 and "Ớ" 19,034 times in the 2.48B-character sample) fell back to
+# bytes: 1,458 of the 4,403 byte pieces left in 5,000 held-out documents. Other characters
+# get the same treatment automatically when frequent enough in the training text
+# (hamic.tokenization.trainer.CHARACTER_SHARE).
+version: 3
+groups:
+  corpus_emoji: [
+    "✔", "✅", "⭐", "♦", "👉", "★", "➤", "✓", "♥", "❤", "🌟", "❖", "☎", "☆", "♣",
+    "🙂", "➡", "✪", "😀", "➢", "☞", "☛", "✦", "♠", "⚡", "☑", "🌻", "❌", "🌹", "🔥",
+    "✿", "🍀", "✨", "💝", "📌", "📞", "💥", "🎁", "🌼", "⭕", "👍", "🔸", "🌈", "♡",
+    "🌐", "💕", "🌷", "⚽", "😍", "😉", "🌸", "📍", "🔹", "💯", "💎", "😊", "⚠", "🏠",
+    "🥇", "☀", "🔴", "😂", "♻", "🏆", "😁", "🎉", "👇", "👀", "💡", "💰", "🔔", "❓",
+    "❗", "✳", "✍", "❣", "☘", "🎯", "🌏", "💦", "🌿", "🌱", "🍃", "🔗", "💻", "📢",
+  ]
+  social_emoji: [
+    "🤣", "😭", "🙏", "😘", "🥰", "😅", "🥺", "🤦", "🤷", "🙄", "😆", "🤗", "🤔", "👏",
+    "😳", "🥳", "😎", "👌", "💜", "😔", "💪", "💖", "😋", "😏", "😢", "💗", "😩", "💞",
+    "💙", "😃", "😡", "😜", "🙈", "✌", "😄", "🤩", "😇", "😌", "💛", "😤", "🤪", "😑",
+    "😥", "🤭", "😱", "😴", "😮", "😒", "😝", "🥲", "😐", "😕", "😬", "🤬", "😠", "😞",
+    "😓", "😪", "🤤", "😵", "🤯", "😲", "😰", "😟", "🙁", "😣", "😖", "😫", "💀", "👎",
+    "💔", "🖤", "🤍", "🧡", "💚", "🤝", "🙌", "👋", "👊", "🤞", "🫶", "😗", "😚", "🤑",
+    "😷", "🤮", "🥵", "😈", "🤡", "💩", "🇻🇳", "🙃", "😶", "☹", "☺", "🤥", "🤫", "🤨",
+    "🧐", "🤓", "😛", "🙊", "🙉", "😹", "😻", "😿", "💋", "💓", "💘", "💟", "👈", "👆",
+    "🖕", "💁", "💆", "🙆", "🙅", "🤧", "🤕", "🤒", "🥱", "🥴", "😙", "🤐", "😯", "😦",
+    "😧", "😨", "🥶", "👻", "👑", "🌝", "🌚", "🐶", "🐱", "🍑", "🍌", "🍓", "🎂", "🎶",
+  ]
+  modifiers: ["🏻", "🏼", "🏽", "🏾", "🏿", "♀", "♂"]
+  emoticons: [
+    ":)", ":))", ":)))", ":(", ":((", ":(((", "=))", "=)))", "=((", ";)", ":'(", "^^",
+    "^_^", "-_-", ":-)", ":-(", "@@", "..",
+  ]
+  symbols: [
+    "₫", "€", "£", "¥", "°", "±", "×", "÷", "≈", "≠", "≤", "≥", "∞", "√", "π", "μ",
+    "Ω", "α", "β", "γ", "Δ", "λ", "σ", "→", "←", "↑", "↓", "⇒", "⇔", "►", "▶", "●",
+    "■", "▪", "•", "–", "—", "“", "”", "‘", "’", "«", "»", "©", "®", "§", "【", "】",
+    "。",
+  ]
+characters: [
+  "à", "á", "ã", "ả", "ạ", "ă", "ằ", "ắ", "ẵ", "ẳ", "ặ", "â", "ầ", "ấ", "ẫ", "ẩ", "ậ",
+  "è", "é", "ẽ", "ẻ", "ẹ", "ê", "ề", "ế", "ễ", "ể", "ệ", "ì", "í", "ĩ", "ỉ", "ị", "ò",
+  "ó", "õ", "ỏ", "ọ", "ô", "ồ", "ố", "ỗ", "ổ", "ộ", "ơ", "ờ", "ớ", "ỡ", "ở", "ợ", "ù",
+  "ú", "ũ", "ủ", "ụ", "ư", "ừ", "ứ", "ữ", "ử", "ự", "ỳ", "ý", "ỹ", "ỷ", "ỵ", "đ",
+  "À", "Á", "Ã", "Ả", "Ạ", "Ă", "Ằ", "Ắ", "Ẵ", "Ẳ", "Ặ", "Â", "Ầ", "Ấ", "Ẫ", "Ẩ", "Ậ",
+  "È", "É", "Ẽ", "Ẻ", "Ẹ", "Ê", "Ề", "Ế", "Ễ", "Ể", "Ệ", "Ì", "Í", "Ĩ", "Ỉ", "Ị", "Ò",
+  "Ó", "Õ", "Ỏ", "Ọ", "Ô", "Ồ", "Ố", "Ỗ", "Ổ", "Ộ", "Ơ", "Ờ", "Ớ", "Ỡ", "Ở", "Ợ", "Ù",
+  "Ú", "Ũ", "Ủ", "Ụ", "Ư", "Ừ", "Ứ", "Ữ", "Ử", "Ự", "Ỳ", "Ý", "Ỹ", "Ỷ", "Ỵ", "Đ",
+]

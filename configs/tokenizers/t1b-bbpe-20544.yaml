@@ -1,0 +1,27 @@
+# HAMIC tokenizer (22/11/2026). The pipeline is fixed in code (TokenizerSpec docstring,
+# hamic.tokenization.build_tokenizer); this file sets size and training details only.
+# Why each pipeline step exists, measured on T1 (the pilot tokenizer it replaces):
+# - trained on the balanced v0.12 sample (473K documents, 2.1B characters): T1 had 249
+#   ids never seen in 50M train tokens, 4,657 seen < 100 times;
+# - prefix space: the first word of every input used a no-space variant;
+# - virtual space after a newline, ( [ { “ ‘ « or an opening straight quote: 3.16% of
+#   words had no space before them, 0.79% after the change;
+# - digits: runs of up to 4 stay whole (years, the "000" groups of 1.000.000), longer
+#   runs in pairs from the right (all 100 pairs are learned; triplets learned only 83 of
+#   1,000, so 0912345678 became 0|9|12|3|45|6|78; now 09|12|34|56|78);
+# - corpus cleanup inside the tokenizer (zero-width, NBSP, tabs, runs of spaces), NFKC
+#   (fullwidth punctuation, "fancy" letters 𝐧𝐚𝐦), Ð -> Đ, emoji variation selectors;
+# - look-alike letters folded in Python ("пgười ѕẽ nàу", 72K word occurrences in 449M
+#   characters; hamic.tokenization.prepare_text);
+# - required strings (resources/required_tokens.yaml): frequent emoji, skin tones, gender
+#   signs, emoticons (":))" 360 times in the VSMEC/ViHSD test sets) as single tokens.
+# Final T1b (23/11/2026): trained on the mixed-genre sample data/work/t1b-tokenizer-sample
+# (1.93G characters: FineWeb 49%, Wikipedia 7%, news 10%, PDF 10%, social 12%, legal 5%,
+# books 4%, poetry 1.6%; data/work/t1b-sample/build_sample.py). On held-out validation
+# documents: social 1.220 tokens/syllable (T1 1.339), PDF 1.329 (1.387), legal 1.229 (1.295).
+# Changing the tokenizer re-tokenizes the corpus and needs new pretraining runs.
+name: t1b-bbpe-20544
+vocab_size: 20544
+min_frequency: 2
+model_max_length: 2048
+required_count: 50000

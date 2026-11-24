@@ -398,6 +398,26 @@ def _predict_answers(
     return answers
 
 
+def _prepared(data: TaskData) -> TaskData:
+    """``data`` after :func:`hamic.tokenization.prepare_text`, as in pretraining.
+
+    Every text field is prepared; lengths are unchanged, so answer spans stay valid.
+    """
+    from hamic.tokenization import prepare_text
+
+    def fold(value: Any) -> Any:
+        if isinstance(value, str):
+            return prepare_text(value)
+        if isinstance(value, list):
+            return [fold(v) for v in value]
+        if isinstance(value, dict):
+            return {k: (v if k in ("label", "start", "id") else fold(v)) for k, v in value.items()}
+        return value
+
+    splits = {role: [fold(row) for row in rows] for role, rows in data.splits.items()}
+    return TaskData(data.spec, splits, data.labels)
+
+
 # -- one task ---------------------------------------------------------------------------
 
 
@@ -416,6 +436,7 @@ def run_task(
     )
 
     cfg = cfg or FinetuneConfig()
+    data = _prepared(data)
     spec = data.spec
     pad = int(tokenizer.pad_token_id)
     started = time.monotonic()

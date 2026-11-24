@@ -315,14 +315,7 @@ def _cmd_tokenizer_train(args: argparse.Namespace) -> int:
 
     spec = TokenizerSpec.from_yaml(args.spec)
     corpus = _expand(args.corpus)
-    segmenter = None
-    if args.segmenter == "pyvi":
-        from hamic.tokenization import PyviSegmenter
-
-        segmenter = PyviSegmenter()
-    tokenizer = train_tokenizer(
-        spec, _texts(corpus, args.limit), segmenter=segmenter, show_progress=True
-    )
+    tokenizer = train_tokenizer(spec, _texts(corpus, args.limit), show_progress=True)
     provenance = {"corpus_files": [p.as_posix() for p in corpus], "limit": args.limit}
     for kind in args.kind:
         export_tokenizer(tokenizer, spec, Path(args.out) / kind, TokenizerKind(kind), provenance)
@@ -341,11 +334,11 @@ def _tokenizer_name(directory: Path) -> str:
 def _cmd_tokenizer_eval(args: argparse.Namespace) -> int:
     from tokenizers import Tokenizer
 
-    from hamic.tokenization import TokenizerEvaluator
+    from hamic.tokenization import TokenizerEvaluator, prepare_text
 
     tokenizer = Tokenizer.from_file(str(Path(args.tokenizer) / "tokenizer.json"))
     report = TokenizerEvaluator(tokenizer, name=_tokenizer_name(Path(args.tokenizer))).run(
-        _texts(_expand(args.corpus), args.limit)
+        prepare_text(text) for text in _texts(_expand(args.corpus), args.limit)
     )
     data = report.to_dict()
     if args.out:
@@ -579,9 +572,6 @@ def _parser() -> argparse.ArgumentParser:
     train.add_argument("--out", required=True)
     train.add_argument("--kind", nargs="+", default=["encoder", "decoder"])
     train.add_argument("--limit", type=int)
-    train.add_argument(
-        "--segmenter", choices=["pyvi"], help="word segmenter for input_mode: segmented"
-    )
     train.set_defaults(func=_cmd_tokenizer_train)
 
     evaluate = tok.add_parser("eval", help="run the acceptance suite")

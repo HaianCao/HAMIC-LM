@@ -8,6 +8,7 @@ vocabularies can be compared on the same text.
 from __future__ import annotations
 
 import functools
+import re
 import time
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
@@ -18,6 +19,9 @@ from typing import Any, Protocol
 from hamic.tokenization.probes import ProbeSet, load_probes
 
 __all__ = ["AcceptanceReport", "CorpusMetrics", "EncodedText", "TokenizerEvaluator"]
+
+# Python form of ``hamic.tokenization.trainer._VIRTUAL_SPACE`` (``[^\W\d_]`` = a letter).
+_VIRTUAL_SPACE = re.compile(r"(?<=[\n(\[{“‘«]) (?=[^\W_])|(?<=\s[\"']) (?=[^\W_])")
 
 
 @dataclass(frozen=True)
@@ -33,6 +37,8 @@ class _Encoder(Protocol):
     def encode(self, text: str) -> EncodedText: ...
     def decode(self, ids: list[int]) -> str: ...
     def token_bytes(self, token_id: int) -> bytes: ...
+    def restores(self, ids: list[int], text: str) -> bool: ...
+    def deletes(self, char: str) -> bool: ...
 
 
 class _TokenizersAdapter:
@@ -43,6 +49,7 @@ class _TokenizersAdapter:
 
         self._tok = tokenizer
         self._byte_decoder = decoders.ByteLevel()
+        self._deleted: dict[str, bool] = {}
 
     def encode(self, text: str) -> EncodedText:
         enc = self._tok.encode(text, add_special_tokens=False)
@@ -55,6 +62,33 @@ class _TokenizersAdapter:
         token = self._tok.id_to_token(token_id)
         mapping = _byte_level_inverse()
         return bytes(mapping[ch] for ch in token if ch in mapping)
+
+    def deletes(self, char: str) -> bool:
+        """Whether the normalizer removes ``char`` entirely (cached per character)."""
+        if char not in self._deleted:
+            normalizer = self._tok.normalizer
+            self._deleted[char] = normalizer is not None and normalizer.normalize_str(char) == ""
+        return self._deleted[char]
+
+    def restores(self, ids: list[int], text: str) -> bool:
+        """Whether decoding ``ids`` gives back ``text`` up to the tokenizer's own changes.
+
+        Two changes are by design and not round-trip failures: the normalizer (NFC, folded
+        look-alikes) and the prefix space added before text that does not start with one.
+        """
+        normalizer = self._tok.normalizer
+        expected = normalizer.normalize_str(text) if normalizer is not None else text
+        decoded = self.decode(ids)
+        if decoded.startswith(" ") and not expected.startswith(" "):
+            decoded = decoded[1:]
+        # A third: the normalizer inserts a virtual space after a
+        # newline/opening bracket before a letter and the decoder removes it.
+        # At the very start the prefix space acts as the whitespace before a quote.
+        return decoded in (
+            expected,
+            _VIRTUAL_SPACE.sub("", expected),
+            _VIRTUAL_SPACE.sub("", " " + expected)[1:],
+        )
 
 
 @functools.cache
@@ -168,8 +202,7 @@ class TokenizerEvaluator:
             i for i in range(self._vocab_size) if not self._is_complete_utf8(i)
         )
 
-    @staticmethod
-    def _check_offsets(text: str, encoded: EncodedText) -> int:
+    def _check_offsets(self, text: str, encoded: EncodedText) -> int:
         """Count offset defects.
 
         Byte-level tokens that split one multi-byte character legitimately share or
@@ -177,6 +210,7 @@ class TokenizerEvaluator:
         text, a start that moves backwards, or a non-space character no span covers
         (which would silently shift NER/QA labels).
         """
+        deleted = self._enc.deletes
         errors = 0
         covered = [False] * len(text)
         previous_start = 0
@@ -187,7 +221,16 @@ class TokenizerEvaluator:
             previous_start = start
             for index in range(start, end):
                 covered[index] = True
-        errors += sum(1 for i, ch in enumerate(text) if not ch.isspace() and not covered[i])
+        # Characters the normalizer deletes on purpose (zero-width characters, emoji
+        # variation selectors) have no token to cover them, and a combining mark that
+        # Unicode composition merged into the previous character is covered by it.
+        for i, ch in enumerate(text):
+            if covered[i] or ch.isspace() or deleted(ch):
+                continue
+            if i and covered[i - 1] and unicodedata.category(ch) == "Mn":
+                covered[i] = True
+                continue
+            errors += 1
         return errors
 
     def evaluate_corpus(self, texts: Iterable[str]) -> CorpusMetrics:
@@ -206,7 +249,7 @@ class TokenizerEvaluator:
             metrics.characters += len(text)
             metrics.utf8_bytes += len(text.encode("utf-8"))
             per_doc.append(len(encoded.ids))
-            if self._enc.decode(encoded.ids) != text:
+            if not self._enc.restores(encoded.ids, text):
                 metrics.roundtrip_failures += 1
             if self._enc.encode(unicodedata.normalize("NFD", text)).ids != encoded.ids:
                 metrics.nfd_mismatches += 1
@@ -239,7 +282,7 @@ class TokenizerEvaluator:
                 encoded = self._enc.encode(text)
                 syllables = max(1, len(text.split()))
                 ratios.append(len(encoded.ids) / syllables)
-                roundtrip_ok &= self._enc.decode(encoded.ids) == text
+                roundtrip_ok &= self._enc.restores(encoded.ids, text)
                 pieces = [text[s:e] for s, e in encoded.offsets]
                 examples.append({"text": text, "tokens": len(encoded.ids), "pieces": pieces})
             result[category] = {

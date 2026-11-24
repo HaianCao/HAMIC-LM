@@ -78,13 +78,14 @@ def test_tokenized_shards_roundtrip(tmp_path, frozen_corpus, exported_tokenizers
     assert sum(len(d) for d in stored) == train["tokens"]
     lengths = corpus.token_byte_lengths()
     for ids, text in zip(stored, texts, strict=True):
-        assert int(lengths[ids].sum()) == len(text.encode("utf-8"))
+        assert int(lengths[ids].sum()) == len(text.encode("utf-8")) + 1  # + prefix space
     assert lengths[:5].sum() == 0  # special tokens decode to no bytes
 
 
 def test_tokenized_corpus_detects_tampering(tmp_path, frozen_corpus, exported_tokenizers):
     out = tmp_path / "tokens"
     manifest = tokenize_corpus(frozen_corpus, exported_tokenizers[TokenizerKind.ENCODER], out)
+    assert manifest["tokenizer"]["text_preparation"]["lookalikes"]["name"] == "confusables.yaml"
     shard = manifest["splits"]["train"]["shards"][0]["files"]["tokens"]["path"]
     np.save(out / "train" / shard, np.zeros(3, dtype=np.uint16))
     with pytest.raises(ValueError, match="Checksum"):

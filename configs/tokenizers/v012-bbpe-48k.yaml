@@ -1,7 +1,0 @@
-# Corpus-v0.12 tokenizer candidate. Identical recipe to 32K except vocabulary size.
-name: v012-bbpe-48k
-vocab_size: 48000
-input_mode: raw
-digit_mode: grouped
-min_frequency: 2
-model_max_length: 2048
