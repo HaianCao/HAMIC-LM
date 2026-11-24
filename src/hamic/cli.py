@@ -598,9 +598,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     sample_tokens.add_argument("--shard-documents", type=int, default=50_000)
     sample_tokens.add_argument("--batch-size", type=int, default=256)
-    sample_tokens.add_argument(
-        "--split", choices=["train", "validation", "test"], default="train"
-    )
+    sample_tokens.add_argument("--split", choices=["train", "validation", "test"], default="train")
     sample_tokens.add_argument(
         "--shard-index",
         action="append",

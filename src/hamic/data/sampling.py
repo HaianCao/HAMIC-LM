@@ -55,9 +55,7 @@ class _SampleWriter:
         self.close_shard()
         self.directory.mkdir(parents=True, exist_ok=True)
         self._path = self.directory / f"part-{len(self.files):05d}.jsonl.gz"
-        self._raw = gzip.GzipFile(
-            filename=str(self._path), mode="wb", mtime=0, compresslevel=3
-        )
+        self._raw = gzip.GzipFile(filename=str(self._path), mode="wb", mtime=0, compresslevel=3)
         self._stream = io.TextIOWrapper(self._raw, encoding="utf-8")
         self._documents = 0
         self._characters = 0
@@ -173,9 +171,9 @@ def sample_corpora(
                 selected_documents += 1
                 selected_characters += len(document.text)
                 source_counts[document.source_id] = source_counts.get(document.source_id, 0) + 1
-                source_characters[document.source_id] = (
-                    source_characters.get(document.source_id, 0) + len(document.text)
-                )
+                source_characters[document.source_id] = source_characters.get(
+                    document.source_id, 0
+                ) + len(document.text)
     writer.close_shard()
 
     manifest = {
@@ -228,9 +226,7 @@ def _weighted_copies(weight: float, seed: str, identity: str) -> int:
     return whole + int(_selected(f"{seed}-source-weight", "", probe, fraction))
 
 
-def _remote_path(
-    relative: str, prefix: str, remote_files: dict[str, str]
-) -> str:
+def _remote_path(relative: str, prefix: str, remote_files: dict[str, str]) -> str:
     """Resolve an assembled shard to its published base or current-version location."""
     return remote_files.get(relative, f"{prefix.rstrip('/')}/{relative}")
 
