@@ -227,64 +227,15 @@ def test_pii_filter_drops_secrets():
     assert stage.stats.rejected["secret_huggingface_token"] == 1
 
 
-def test_pii_filter_redacts_contacts_but_keeps_vietnamese_money():
+def test_pii_filter_keeps_contact_details_and_numbers():
     from hamic.data import PiiFilterStage
 
     text = (
         "Liên hệ nguyen.van.a@gmail.com hoặc 0912 345 678, máy chủ 192.168.1.10. "
-        "Giá 1.500.000.000 đồng, dân số 100.200.300 người, ngày 25.12.2026, bản 1.2.3.4.5."
+        "| Cộng | 125.100.200.150 | MST 0401420636 | ISBN 978-0-19-280268-4"
     )
     [doc] = list(PiiFilterStage()([_doc(0, text)]))
-    assert "email@example.com" in doc.text
-    assert "gmail" not in doc.text
-    assert "0900000000" in doc.text
-    assert "345 678" not in doc.text
-    assert "0.0.0.0" in doc.text
-    assert "192.168" not in doc.text
-    assert "1.500.000.000 đồng" in doc.text
-    assert "100.200.300 người" in doc.text
-    assert "25.12.2026" in doc.text
-    assert "1.2.3.4.5" in doc.text
-    assert doc.meta["pii_redactions"] == {"email": 1, "phone": 1, "ipv4": 1}
-
-
-@pytest.mark.parametrize(
-    "number",
-    ["ISBN 0-8018-6842-2", "ISBN 978-0-19-280268-4", "ISBN: 0912345678", "978-0912345678"],
-)
-def test_pii_filter_keeps_isbn(number):
-    from hamic.data import PiiFilterStage
-
-    [doc] = list(PiiFilterStage()([_doc(0, f"Sách tham khảo, {number}, Oxford.")]))
-    assert number in doc.text
-
-
-@pytest.mark.parametrize(
-    "phone",
-    [
-        "0912 345 678",
-        "091.234.5678",
-        "+84 912 345 678",
-        "0243 123 4567",
-        "0389-123-456",
-        "04-38691066",
-        "043.933.6868",
-        "0168 123 4567",
-    ],
-)
-def test_pii_filter_redacts_vietnamese_phone_formats(phone):
-    from hamic.data import PiiFilterStage
-
-    [doc] = list(PiiFilterStage()([_doc(0, f"Gọi {phone} để đặt lịch.")]))
-    assert doc.text == "Gọi 0900000000 để đặt lịch."
-
-
-@pytest.mark.parametrize("number", ["00912345678", "05 09 2012 08:54:07", "0,5 m"])
-def test_pii_filter_ignores_non_vietnamese_prefixes(number):
-    from hamic.data import PiiFilterStage
-
-    [doc] = list(PiiFilterStage()([_doc(0, f"Mã số {number} trong bảng.")]))
-    assert number in doc.text
+    assert doc.text == text
 
 
 def test_parallel_pipeline_matches_serial(tmp_path: Path):
@@ -311,7 +262,7 @@ def test_parallel_pipeline_matches_serial(tmp_path: Path):
             f["sha256"] for f in parallel["splits"][split]["files"]
         ]
     pii = next(s for s in parallel["stages"] if s["name"] == "pii_filter")
-    assert pii["modified"]["phone"] > 0
+    assert pii["kept"] == pii["seen"] > 0
 
 
 def test_default_config_file_matches_code_defaults():

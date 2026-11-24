@@ -183,83 +183,23 @@ _SECRET_PATTERNS: dict[str, str] = {
 }
 # One pass over the text instead of one per pattern; ``lastgroup`` names the kind.
 _SECRETS = re.compile("|".join(f"(?P<{k}>{p})" for k, p in _SECRET_PATTERNS.items()))
-_EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
-# Vietnamese numbers written with a leading 0 or +84 and optional space/dot/hyphen
-# separators. Current plan: mobile 03/05/07/08/09 + 8 digits, landline 02 + 9 digits.
-# Pre-2018 plan, still common in web text: mobile 01x + 8 digits (11 digits total),
-# landline 02-08 + 8-9 digits. A number followed by ":" is a time, not a phone number.
-_PHONE = re.compile(
-    r"(?<![\w.,-])(?:\+84[ .-]?|0)"
-    r"(?:[35789](?:[ .-]?\d){8}|1(?:[ .-]?\d){9}|[2-8](?:[ .-]?\d){8,9})"
-    r"(?![\w:]|[.,-]?\d)"
-)
-# Book identifiers look like phone numbers ("ISBN 0-8018-...", "978-0-19-...").
-_ISBN_CONTEXT = re.compile(r"(?:ISBN(?:-1[03])?:?\s*(?:97[89][ -]?)?|97[89][ -])$", re.IGNORECASE)
-# IPv4 with valid octets and no leading zeros. Vietnamese writes money with dots as
-# thousands separators ("1.500.000.000"); those groups are three digits and often
-# "000" or above 255, so they do not match.
-_OCTET = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
-_IPV4 = re.compile(rf"(?<![\d.]){_OCTET}(?:\.{_OCTET}){{3}}(?![\d.]*\d)")
 
 
 class PiiFilterStage(Stage):
-    """Drop documents that contain credentials and anonymize common personal data.
+    """Drop documents that leak credentials (API keys, access tokens, private keys).
 
-    Credentials (API keys, tokens, private keys) cause the whole document to be dropped.
-    E-mail addresses, Vietnamese phone numbers and IPv4 addresses are replaced with fixed
-    dummy values, which keeps the text natural for tokenizer training. Counts of each
-    replacement are reported in ``StageStats.modified`` and ``meta["pii_redactions"]``.
-
-    This is a heuristic first pass, not a privacy guarantee: names, addresses and ID
-    numbers are not detected and must be covered by the human audit.
+    Contact details (e-mail addresses, phone numbers, IP addresses) are kept as written:
+    every source is public text, and the redactions used before v0.13 also replaced
+    money amounts ("125.100.200.150") and enterprise codes that only look like them.
     """
 
     name = "pii_filter"
     parallel_safe = True
 
-    EMAIL_REPLACEMENT = "email@example.com"
-    PHONE_REPLACEMENT = "0900000000"
-    IP_REPLACEMENT = "0.0.0.0"
-
     def process(self, document: Document) -> Document | str:
-        """Reject on secrets, otherwise redact personal data."""
-        text = document.text
-        secret = _SECRETS.search(text)
-        if secret:
-            return f"secret_{secret.lastgroup}"
-        counts: dict[str, int] = {}
-        for kind, pattern, replacement in (
-            ("email", _EMAIL, self.EMAIL_REPLACEMENT),
-            ("phone", _PHONE, self.PHONE_REPLACEMENT),
-            ("ipv4", _IPV4, self.IP_REPLACEMENT),
-        ):
-            text, found = self._redact(text, pattern, replacement, isbn_guard=kind == "phone")
-            if found:
-                counts[kind] = found
-        if not counts:
-            return document
-        return document.with_text(text).with_meta(pii_redactions=counts)
-
-    def modification_counts(self, document: Document) -> Mapping[str, int]:
-        """Redactions made in ``document``."""
-        counts: Mapping[str, int] = document.meta.get("pii_redactions", {})
-        return counts
-
-    @staticmethod
-    def _redact(
-        text: str, pattern: re.Pattern[str], replacement: str, isbn_guard: bool
-    ) -> tuple[str, int]:
-        found = 0
-
-        def substitute(match: re.Match[str]) -> str:
-            nonlocal found
-            before = text[max(0, match.start() - 16) : match.start()]
-            if isbn_guard and _ISBN_CONTEXT.search(before):
-                return match.group(0)
-            found += 1
-            return replacement
-
-        return pattern.sub(substitute, text), found
+        """Reject on secrets."""
+        secret = _SECRETS.search(document.text)
+        return f"secret_{secret.lastgroup}" if secret else document
 
 
 @dataclass(frozen=True)
