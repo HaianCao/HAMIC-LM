@@ -1,0 +1,42 @@
+# HAMIC-ES on cumulative corpus v0.14 with the final T1b tokenizer.
+# Same shape, budget and recipe as hamic-es-v05 so the run isolates corpus + tokenizer.
+# v0.14 train: 78,958,189,835 T1b tokens (v0.12 web + Wikipedia 66.24B, news 5.93B,
+# PDF 5.16B, books 0.65B, legal 0.40B, VOZ 0.34B, ViSoBERT social 0.22B, poetry 0.03B).
+# 20B is ~0.25 epoch. Social text is upweighted: HAMIC-EM/ES trail ViSoBERT on VSMEC/ViHSD.
+version: 1
+run_id: hamic-es-v014
+model_preset: configs/models/hamic-es.yaml   # 24 x 768, ~150.9M parameters
+tokenized: data/tokenized/v0.14/t1b-bbpe-20544
+objective: mlm
+mask_rate: 0.30
+seq_len: 512
+micro_batch_size: 128
+grad_accum_steps: 4          # 262,144 tokens per optimizer step
+total_tokens: 2.0e10         # ~76,294 optimizer steps
+learning_rate: 8.0e-4
+warmup_ratio: 0.03           # ~2,289 steps
+min_lr_ratio: 0.1
+betas: [0.9, 0.98]
+weight_decay: 0.01
+grad_clip: 1.0
+precision: bf16
+seed: 1234
+device: auto
+compile: true
+sparse_prediction: true
+attention: flex_attention
+lr_schedule: wsd
+decay_ratio: 0.2
+cross_document_attention: false
+source_weights:
+  wikipedia-vi-20231101: 2.0
+  visobert-social: 4.0       # 0.22B -> 0.89B per epoch
+  voz-hsd-forum: 3.0         # 0.34B -> 1.02B per epoch
+  thivien-poetry: 2.0
+masking: pmi
+pmi_unit_share: 0.5
+log_every_steps: 10
+eval_every_steps: 1000
+eval_sequences: 2048
+eval_mask_rate: 0.15
+checkpoint_every_minutes: 30
