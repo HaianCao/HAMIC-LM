@@ -53,11 +53,15 @@ _OPTIONAL_IDENTITY_FIELDS = (
     "pmi_discount_k",
     "pmi_chunk_tokens",
     "pmi_max_unit_length",
+    "pmi_max_ngram",
+    "pmi_min_doc_count",
+    "pmi_max_extension_share",
+    "whole_word_masking",
     "variant_share",
 )
 
 LR_SCHEDULES = ("cosine", "wsd")
-MASKING_UNITS = ("token", "span", "pmi")
+MASKING_UNITS = ("token", "span", "pmi", "pmi_ngram")
 ATTENTION_BACKENDS = ("sdpa", "flex_attention")
 
 
@@ -112,9 +116,22 @@ class PretrainConfig:
             the all-in-memory miner; set this for 500M-token mining.
         pmi_max_unit_length: Most tokens joined into one PMI unit. ``None`` preserves the
             unrestricted legacy behaviour.
+        pmi_max_ngram: ``masking: pmi_ngram`` only: longest mined n-gram of whole
+            syllables (2-3). ``pmi_max_pairs`` caps the n-grams kept over all lengths and
+            ``pmi_min_pmi`` gates the minimum PMI over every split of an n-gram.
+        pmi_min_doc_count: ``masking: pmi_ngram`` only: fewest distinct documents that must
+            contain a kept n-gram.
+        pmi_max_extension_share: ``masking: pmi_ngram`` only: drop an n-gram when one left
+            or right neighbour accounts for at least this share of its occurrences (a
+            fragment of a longer expression). ``1.0`` disables the test.
+        whole_word_masking: Keep word-continuation pieces (a letter/digit token without a
+            leading space after another such token, e.g. "tr" + "í") in the unit of the
+            preceding token, for any ``masking``.
         masking: MLM selection unit: ``"token"``, ``"span"`` (geometric spans, SpanBERT)
             or ``"pmi"`` (runs of tokens joined by high-PMI pairs mined from the train
-            split, a segmenter-free proxy for Vietnamese multi-syllable words).
+            split, a segmenter-free proxy for Vietnamese multi-syllable words) or
+            ``"pmi_ngram"`` (E6c: n-grams of whole syllables scored by their minimum PMI
+            over every split, matched longest first; see :mod:`hamic.training.ngram_units`).
         variant_share: Share of selected MLM positions replaced by a Vietnamese variant of
             the same token (other tone, no diacritics, teencode, other casing) while the
             label stays the original. Taken first from the 10% random replacements, then
@@ -172,6 +189,10 @@ class PretrainConfig:
     pmi_discount_k: float = 0.0
     pmi_chunk_tokens: int | None = None
     pmi_max_unit_length: int | None = None
+    pmi_max_ngram: int = 3
+    pmi_min_doc_count: int = 5
+    pmi_max_extension_share: float = 0.6
+    whole_word_masking: bool = False
     variant_share: float = 0.0
     attention: str = "sdpa"
     sparse_prediction: bool = False
@@ -209,6 +230,12 @@ class PretrainConfig:
             raise ValueError("pmi_chunk_tokens must be positive or null")
         if self.pmi_max_unit_length is not None and self.pmi_max_unit_length < 2:
             raise ValueError("pmi_max_unit_length must be >= 2 or null")
+        if not 2 <= self.pmi_max_ngram <= 3:
+            raise ValueError("pmi_max_ngram must be in [2, 3]")
+        if not 0 < self.pmi_max_extension_share <= 1:
+            raise ValueError("pmi_max_extension_share must be in (0, 1]")
+        if self.pmi_min_doc_count < 1:
+            raise ValueError("pmi_min_doc_count must be >= 1")
         if self.span_max_length < 1:
             raise ValueError("span_max_length must be >= 1")
         if self.masking not in MASKING_UNITS:
@@ -288,6 +315,7 @@ class PretrainConfig:
             "pmi_min_count",
             "pmi_max_pairs",
             "pmi_chunk_tokens",
+            "pmi_min_doc_count",
         ):
             if key in values:
                 values[key] = None if values[key] is None else int(float(values[key]))

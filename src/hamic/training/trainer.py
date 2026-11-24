@@ -41,6 +41,13 @@ from hamic.training.masking import (
     mine_pmi_pairs,
     word_tokens,
 )
+from hamic.training.ngram_units import (
+    NgramTables,
+    NgramUnits,
+    TokenClasses,
+    WholeWordUnits,
+    mine_pmi_ngrams,
+)
 from hamic.training.objectives import CausalLM, MaskedLM, Objective
 from hamic.training.state import SAVED_STATE, load_training_state, save_training_state
 
@@ -48,6 +55,8 @@ __all__ = ["Pretrainer", "TrainResult"]
 
 COMPLETE_NAME = "COMPLETE.json"
 _EVAL_SEED_OFFSET = 1 << 40
+
+
 @dataclass
 class TrainResult:
     """Outcome of one session.
@@ -203,18 +212,74 @@ class Pretrainer:
 
     def _selection_units(self) -> SelectionUnits:
         special = range(len(self.preset.special_tokens.ordered))
+        units: SelectionUnits
         if self.config.masking == "span":
-            return SpanUnits(max_length=self.config.span_max_length)
-        if self.config.masking == "pmi":
+            units = SpanUnits(max_length=self.config.span_max_length)
+        elif self.config.masking == "pmi":
             pairs = torch.from_numpy(self._pmi_pairs())
-            return PmiUnits(
+            units = PmiUnits(
                 pairs,
                 self.preset.vocab_size,
                 special,
                 keep=self.config.pmi_unit_share,
                 max_length=self.config.pmi_max_unit_length,
             )
-        return TokenUnits()
+        elif self.config.masking == "pmi_ngram":
+            units = NgramUnits(
+                self._pmi_ngrams(),
+                self._token_classes(),
+                special,
+                keep=self.config.pmi_unit_share,
+            )
+        else:
+            units = TokenUnits()
+        if self.config.whole_word_masking:
+            units = WholeWordUnits(units, self._token_classes(), special)
+        return units
+
+    def _token_classes(self) -> TokenClasses:
+        return TokenClasses.from_tokenizer_file(self.corpus.tokenizer_file())
+
+    def _pmi_ngrams(self) -> NgramTables:
+        """E6c n-gram table mined from train tokens and cached by every material input."""
+        cfg = self.config
+        mining = {
+            "max_n": cfg.pmi_max_ngram,
+            "max_tokens": cfg.pmi_max_tokens,
+            "min_count": cfg.pmi_min_count,
+            "min_doc_count": cfg.pmi_min_doc_count,
+            "min_pmi": cfg.pmi_min_pmi,
+            "max_units": cfg.pmi_max_pairs,
+            "discount_k": cfg.pmi_discount_k,
+            "max_extension_share": cfg.pmi_max_extension_share,
+            "eligibility": "complete-letter-syllables-v2",
+        }
+        digest = json_sha256(
+            {
+                "source_corpus": self.corpus.manifest["source_corpus"],
+                "tokenizer": self.corpus.manifest["tokenizer"],
+                "mining": mining,
+            }
+        )[:16]
+        cache = self.workdir / f"pmi-ngrams-{digest}.npz"
+        if cache.is_file():
+            return NgramTables.load(cache)
+        tables = mine_pmi_ngrams(
+            self.corpus.documents("train"),
+            self.preset.vocab_size,
+            special_ids=range(len(self.preset.special_tokens.ordered)),
+            classes=self._token_classes(),
+            max_n=cfg.pmi_max_ngram,
+            max_tokens=cfg.pmi_max_tokens,
+            min_count=cfg.pmi_min_count,
+            min_doc_count=cfg.pmi_min_doc_count,
+            min_pmi=cfg.pmi_min_pmi,
+            max_units=cfg.pmi_max_pairs,
+            discount_k=cfg.pmi_discount_k,
+            max_extension_share=cfg.pmi_max_extension_share,
+        )
+        tables.save(cache)
+        return tables
 
     def _pmi_pairs(self) -> np.ndarray[Any, Any]:
         """Collocations mined from train tokens and cached by every material input."""

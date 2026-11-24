@@ -235,9 +235,7 @@ def test_pmi_mining_and_units_join_collocations():
 
 def test_discounted_pmi_prefers_well_supported_pair():
     documents = [np.array([10, 11])] * 10 + [np.array([20, 21])] * 100
-    raw = mine_pmi_pairs(
-        documents, 30, special_ids=(), min_count=1, min_pmi=0.0, max_pairs=1
-    )
+    raw = mine_pmi_pairs(documents, 30, special_ids=(), min_count=1, min_pmi=0.0, max_pairs=1)
     discounted = mine_pmi_pairs(
         documents,
         30,
@@ -346,7 +344,7 @@ def test_sparse_prediction_gives_the_same_loss(tmp_path, tokenized):  # noqa: F8
         )
 
 
-@pytest.mark.parametrize("masking", ["span", "pmi"])
+@pytest.mark.parametrize("masking", ["span", "pmi", "pmi_ngram"])
 def test_modernbert_trains_with_every_option(tmp_path, tokenized, masking):  # noqa: F811
     config = _config(
         tmp_path,
@@ -362,6 +360,8 @@ def test_modernbert_trains_with_every_option(tmp_path, tokenized, masking):  # n
         masking=masking,
         variant_share=0.1,
         sparse_prediction=True,
+        whole_word_masking=masking == "pmi_ngram",
+        pmi_min_doc_count=1,
     )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -373,6 +373,8 @@ def test_modernbert_trains_with_every_option(tmp_path, tokenized, masking):  # n
     assert set(result.evaluations) == {4, 8}
     if masking == "pmi":
         assert list((tmp_path / "work").glob("pmi-pairs-*.npy"))
+    if masking == "pmi_ngram":
+        assert list((tmp_path / "work").glob("pmi-ngrams-*.npz"))
 
 
 def test_offline_evaluation_of_a_published_run(tmp_path, tokenized):  # noqa: F811

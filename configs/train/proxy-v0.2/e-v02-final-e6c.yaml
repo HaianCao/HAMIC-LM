@@ -1,0 +1,43 @@
+# E-proxy v0.2 round, follow-up: final recipe (E1+E2+E3) + E6c. Same as e-v02-final-e6b
+# except the masking units. E6b joins neighbours whose *pair* is a strong collocation and
+# chains pairs ("học sinh" + "sinh viên" -> one 3-token unit). E6c mines n-grams of 2-3
+# whole syllables scored by their minimum PMI over every split (PMI-Masking, Levine 2021),
+# requires 5 documents, drops fragments of longer expressions (one neighbour >= 60% of the
+# occurrences: "lực lượng an" -> "an ninh"), excludes digits, matches longest first without
+# overlap, and keeps word-continuation pieces ("tr" + "í") with their word. On 64 v0.5
+# validation rows: 47.9% of tokens in multi-token units vs 42.2% for E6b.
+version: 1
+run_id: e-v02-final-e6c
+model_preset: configs/models/proxy/e-proxy-m-t1.yaml
+tokenized: data/tokenized/v0.2/t1-bbpe-20544
+objective: mlm
+mask_rate: 0.30
+seq_len: 512
+micro_batch_size: 128
+grad_accum_steps: 4          # 262,144 tokens per optimizer step
+total_tokens: 5.0e8
+learning_rate: 8.0e-4
+warmup_ratio: 0.06
+min_lr_ratio: 0.1
+betas: [0.9, 0.98]
+weight_decay: 0.01
+grad_clip: 1.0
+precision: bf16
+seed: 1234
+device: auto
+compile: true                # operational
+sparse_prediction: true      # operational: MLM head on labelled positions only (same loss)
+log_every_steps: 10
+eval_every_steps: 250
+eval_sequences: 2048
+eval_mask_rate: 0.15        # validation always masks 15%, token-level, no variants
+checkpoint_every_minutes: 30
+lr_schedule: wsd
+decay_ratio: 0.2
+cross_document_attention: false
+source_weights:
+  wikipedia-vi-20231101: 2.0
+masking: pmi_ngram
+pmi_unit_share: 0.5
+pmi_max_ngram: 3
+whole_word_masking: true
