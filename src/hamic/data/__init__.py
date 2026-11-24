@@ -21,6 +21,7 @@ from hamic.data.registry import (
     SourceStatus,
     UseCase,
 )
+from hamic.data.retokenize import retokenize_published
 from hamic.data.sampling import SAMPLE_MANIFEST, sample_corpora, sample_published_tokenized
 from hamic.data.stages import (
     ContaminationFilterStage,
@@ -82,6 +83,7 @@ __all__ = [
     "index_corpus",
     "publish_tokenized",
     "read_jsonl",
+    "retokenize_published",
     "sample_corpora",
     "sample_published_tokenized",
     "shuffled_files",

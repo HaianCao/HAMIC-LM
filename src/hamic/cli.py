@@ -282,6 +282,34 @@ def _cmd_corpus_sample(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_corpus_retokenize(args: argparse.Namespace) -> int:
+    from hamic.data import retokenize_published
+
+    result = retokenize_published(
+        args.tokenized,
+        _store(args.store),
+        args.prefix,
+        args.tokenizer,
+        args.out,
+        args.push_prefix,
+        workers=args.workers,
+        batch_size=args.batch_size,
+        push_every=args.push_every,
+        max_shards=args.max_shards,
+        check_every=args.check_every,
+    )
+    summary = (
+        {
+            s: {k: v for k, v in info.items() if k != "shards"}
+            for s, info in result["splits"].items()
+        }
+        if "splits" in result
+        else result
+    )
+    _print_json({"output": args.out, "push_prefix": args.push_prefix, "splits": summary})
+    return 0
+
+
 def _cmd_corpus_sample_tokenized(args: argparse.Namespace) -> int:
     from hamic.data import sample_published_tokenized
 
@@ -535,6 +563,25 @@ def _parser() -> argparse.ArgumentParser:
     )
     sample.add_argument("--shard-documents", type=int, default=50_000)
     sample.set_defaults(func=_cmd_corpus_sample)
+
+    retok = corpus.add_parser(
+        "retokenize",
+        help="convert a published tokenized version to a new tokenizer, shard by shard",
+    )
+    retok.add_argument("--tokenized", required=True, help="local lightweight manifest dir")
+    retok.add_argument("--store", required=True, help=store_help)
+    retok.add_argument("--prefix", required=True, help="published folder to convert")
+    retok.add_argument("--tokenizer", required=True, help="new tokenizer directory")
+    retok.add_argument("--out", required=True, help="local working directory (resumable)")
+    retok.add_argument("--push-prefix", required=True, help="published folder to write")
+    retok.add_argument("--workers", type=int, default=4)
+    retok.add_argument("--batch-size", type=int, default=512)
+    retok.add_argument("--push-every", type=int, default=16, help="shards per Hub commit")
+    retok.add_argument("--max-shards", type=int, help="trial: stop after this many shards")
+    retok.add_argument(
+        "--check-every", type=int, default=50, help="old-tokenizer round-trip every n-th doc"
+    )
+    retok.set_defaults(func=_cmd_corpus_retokenize)
 
     sample_tokens = corpus.add_parser(
         "sample-tokenized",

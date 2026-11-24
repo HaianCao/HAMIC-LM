@@ -186,3 +186,65 @@ def test_sample_published_tokenized_roundtrips_to_text(
         split="validation",
     )
     assert heldout["split"] == "validation"
+
+
+def test_retokenize_published_matches_direct_tokenization(
+    tmp_path, frozen_corpus, exported_tokenizers, tiny_spec, corpus
+):
+    import dataclasses
+
+    from hamic.checkpoint import LocalObjectStore
+    from hamic.data import publish_tokenized, retokenize_published
+    from hamic.tokenization import export_tokenizer, train_tokenizer
+
+    old_dir = exported_tokenizers[TokenizerKind.ENCODER]
+    old = tmp_path / "old"
+    tokenize_corpus(frozen_corpus, old_dir, old, shard_tokens=400)
+    store = LocalObjectStore(tmp_path / "store")
+    publish_tokenized(old, store, "tokenized/t/old")
+    spec = dataclasses.replace(tiny_spec, name="new-bbpe", vocab_size=1500)
+    new_dir = export_tokenizer(
+        train_tokenizer(spec, corpus, strict_vocab_size=False),
+        spec,
+        tmp_path / "new",
+        TokenizerKind.ENCODER,
+    )
+    direct = tmp_path / "direct"
+    tokenize_corpus(frozen_corpus, new_dir, direct)
+
+    work = tmp_path / "work"
+    partial = retokenize_published(
+        old,
+        store,
+        "tokenized/t/old",
+        new_dir,
+        work,
+        "tokenized/t/new",
+        workers=1,
+        batch_size=3,
+        push_every=2,
+        max_shards=2,
+        check_every=1,
+    )
+    assert partial["finished"] is False
+    assert partial["shards_done"] == 2
+    result = retokenize_published(  # resumes after the two finished shards
+        old,
+        store,
+        "tokenized/t/old",
+        new_dir,
+        work,
+        "tokenized/t/new",
+        workers=2,
+        batch_size=3,
+        push_every=2,
+    )
+    assert result["tokenizer"]["name"] == "new-bbpe"
+    assert not list((work / "train").glob("*.npy"))  # uploaded, then removed locally
+    fetched = TokenizedCorpus(tmp_path / "store" / "tokenized/t/new", verify=True)
+    for split in ("train", "validation", "test"):
+        got = [d.tolist() for d in fetched.documents(split)]
+        want = [d.tolist() for d in TokenizedCorpus(direct).documents(split)]
+        assert got == want, split
+        old_sources = [s.sources.tolist() for s in TokenizedCorpus(old).shards(split)]
+        assert [s.sources.tolist() for s in fetched.shards(split)] == old_sources
