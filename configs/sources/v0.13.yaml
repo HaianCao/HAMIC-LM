@@ -1,0 +1,82 @@
+# Corpus v0.13 delta (22/11/2026): genres missing from v0.2-v0.12 (FineWeb-2 web text and
+# Wikipedia). Group 1 of docs/data/v0.13-sources.md. Every row of the grouped sources is
+# checked against all downstream task texts before grouping, and every document again by
+# the contamination stage (configs/pipeline/v0.13.yaml). The dedup index removes anything
+# already in v0.2-v0.12.
+sources:
+# Social media: Facebook, TikTok, YouTube posts and comments (mean ~30 characters per row).
+- type: huggingface
+  source_id: visobert-social
+  dataset: phucdev/ViSoBERT
+  config: null
+  revision: 74dbc64e92c627c70670dd91344b776c8500a104
+  text_field: text
+  id_field: null
+  meta_fields: []
+  data_files:
+  - data/train-00000-of-00003.parquet
+  - data/train-00001-of-00003.parquet
+  - data/train-00002-of-00003.parquet
+  download_dir: data/raw/visobert
+  group:
+    target_chars: 1500
+# Forum: VOZ comments (text column only; the AI hate labels are ignored).
+- type: huggingface
+  source_id: voz-hsd-forum
+  dataset: tarudesu/VOZ-HSD
+  config: null
+  revision: 923915f5f633c503babf2c6dcf7003593318b04f
+  text_field: texts
+  id_field: null
+  meta_fields: []
+  file_format: csv
+  data_files:
+  - data.csv
+  download_dir: data/raw/voz-hsd
+  group:
+    target_chars: 1500
+# Poetry: one poem per row, with its title; short poems are grouped.
+- type: huggingface
+  source_id: thivien-poetry
+  dataset: phamson02/vietnamese-poetry-corpus
+  config: null
+  revision: 0c98940ee8492f7519bddf0c41de5d5eba4856e2
+  text_field: content
+  id_field: null
+  meta_fields: [title, author, period, specific_genre]
+  file_format: csv
+  transform: spaced_poem
+  title_field: title
+  data_files:
+  - poems_dataset.csv
+  download_dir: data/raw/vi-poetry
+  group:
+    target_chars: 1500
+    separator: "\n\n"
+# Legal documents (vbpl.vn), stored as HTML.
+- type: huggingface
+  source_id: vbpl-legal
+  dataset: th1nhng0/vietnamese-legal-documents
+  config: null
+  revision: 8977887f17be2defae4c5171d55562e1cde7d695
+  text_field: content_html
+  id_field: id
+  meta_fields: []
+  transform: html
+  data_files:
+  - data/content.parquet
+  download_dir: data/raw/vi-legal
+# PDFs (reports, course material, administrative documents).
+- type: huggingface
+  source_id: finepdfs-vie-latn
+  dataset: HuggingFaceFW/finepdfs
+  config: vie_Latn
+  revision: 220bac3acbf07789502c621d2d33952f51ac7f86
+  text_field: text
+  id_field: id
+  meta_fields: [url, date, extractor, token_count]
+  data_files:
+  - data/vie_Latn/train/000_00000.parquet
+  - data/vie_Latn/train/000_00001.parquet
+  - data/vie_Latn/train/000_00002.parquet
+  download_dir: data/raw/finepdfs

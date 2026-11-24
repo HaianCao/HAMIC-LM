@@ -1,0 +1,35 @@
+# Corpus v0.14 delta (22/11/2026): books and news (group 2 of docs/data/v0.13-sources.md).
+# The dedup index removes everything already in v0.2-v0.13 (FineWeb-2 crawled many news
+# and e-book sites), and the contamination stage of configs/pipeline/v0.13.yaml applies.
+sources:
+- type: huggingface
+  source_id: vi-books
+  dataset: tmnam20/Vietnamese-Book-Corpus
+  config: null
+  revision: 3dc42886bdb38338e6cc03b5093c28b5b5694d0b
+  text_field: text
+  id_field: null
+  meta_fields: []
+  data_files:
+  - data/train-00000-of-00008-434a3967f6c4c0f4.parquet
+  - data/train-00001-of-00008-6fed45ff9717b1da.parquet
+  - data/train-00002-of-00008-14351aa8b7f792d4.parquet
+  - data/train-00003-of-00008-fdb56c534d52ac56.parquet
+  - data/train-00004-of-00008-be47438765872609.parquet
+  - data/train-00005-of-00008-a357bbaf12eaeec8.parquet
+  - data/train-00006-of-00008-f4e317464972c061.parquet
+  - data/train-00007-of-00008-399c5b14967345df.parquet
+  download_dir: data/raw/vi-books
+- type: huggingface
+  source_id: binhvq-dedup
+  dataset: imthanhlv/binhvq_dedup
+  config: null
+  revision: a203e97ece3eced76989a77cc5c18d48b937a8cc
+  text_field: text
+  id_field: null
+  meta_fields: []
+  file_format: json
+  data_files:
+  - train.jsonl.zst
+  - val.jsonl.zst
+  download_dir: data/raw/binhvq-dedup

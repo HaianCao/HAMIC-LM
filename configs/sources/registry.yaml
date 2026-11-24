@@ -27,3 +27,98 @@ sources:
     attribution: "FineWeb2 (ODC-By). Cite the FineWeb2 paper."
     pii_risk: high
     notes: Web text. Requires content/PII audit on a stratified sample before approval.
+
+  # -- v0.13 (22/11/2026): genres missing from FineWeb-2/Wikipedia. Approved by the
+  # project owner for research use (group 1 of docs/data/v0.13-sources.md).
+  - source_id: visobert-social
+    publisher: Nguyen et al. (UIT), ViSoBERT pre-training corpus; Hugging Face mirror phucdev/ViSoBERT
+    location: hf://datasets/phucdev/ViSoBERT
+    revision: 74dbc64e92c627c70670dd91344b776c8500a104
+    license: Research use only (ViSoBERT, EMNLP 2023); posts and comments keep their authors' rights
+    status: approved_research
+    reviewer: HAMIC (project owner)
+    reviewed_on: 2026-11-22
+    rationale: "Facebook, TikTok and YouTube posts and comments (2020-2022), the social-media register missing from the corpus and used by VSMEC/ViHSD/VSFC. Research-only use (D-008). Same lab as several benchmarks: every row is checked against all downstream task texts before grouping."
+    attribution: "Cite ViSoBERT (Nguyen et al., EMNLP 2023)."
+    pii_risk: high
+    notes: Unofficial mirror; confirm against the dataset linked from huggingface.co/uitnlp/visobert. Rows are grouped into ~1.5K-character documents.
+
+  - source_id: voz-hsd-forum
+    publisher: Luan Thanh Nguyen (UIT), VOZ-HSD (ViHateT5, Findings of ACL 2024)
+    location: hf://datasets/tarudesu/VOZ-HSD
+    revision: 923915f5f633c503babf2c6dcf7003593318b04f
+    license: 'Research use only ("The provided dataset is only used for research purposes!", dataset card)'
+    status: approved_research
+    reviewer: HAMIC (project owner)
+    reviewed_on: 2026-11-22
+    rationale: "10.7M comments from the VOZ forum: informal forum Vietnamese. Research-only use (D-008). Only the text column is used; the AI-generated hate labels are ignored."
+    attribution: "Cite ViHateT5 (Thanh Nguyen, Findings of ACL 2024)."
+    pii_risk: high
+    notes: Rows grouped into ~1.5K-character documents after the benchmark check.
+
+  - source_id: finepdfs-vie-latn
+    publisher: Hugging Face (HuggingFaceFW/finepdfs), PDFs from Common Crawl
+    location: hf://datasets/HuggingFaceFW/finepdfs/vie_Latn
+    revision: 220bac3acbf07789502c621d2d33952f51ac7f86
+    license: ODC-By 1.0 (dataset); underlying documents keep their own rights; Common Crawl terms of use
+    status: approved_research
+    reviewer: HAMIC (project owner)
+    reviewed_on: 2026-11-22
+    rationale: "Text extracted from PDFs (reports, course material, administrative documents): long, structured documents absent from the web corpus. ODC-By, research use (D-008)."
+    attribution: "FinePDFs (ODC-By). Cite the FinePDFs release."
+    pii_risk: medium
+    notes: Text comes from PDF extraction/OCR; audit line-break and OCR artefacts in the kept sample.
+
+  - source_id: vbpl-legal
+    publisher: th1nhng0/vietnamese-legal-documents, crawled from vbpl.vn (national legal-document database)
+    location: hf://datasets/th1nhng0/vietnamese-legal-documents/data/content.parquet
+    revision: 8977887f17be2defae4c5171d55562e1cde7d695
+    license: CC-BY-4.0 (dataset card); normative legal documents are not protected by copyright in Vietnam
+    status: approved_research
+    reviewer: HAMIC (project owner)
+    reviewed_on: 2026-11-22
+    rationale: "Laws, decrees, circulars and local decisions: formal administrative register. CC-BY-4.0, research use (D-008)."
+    attribution: "Vietnamese legal documents dataset (th1nhng0), CC-BY-4.0; source vbpl.vn."
+    pii_risk: low
+    notes: Stored as HTML; converted with the `html` transform. Signatories' names are public officials.
+
+  - source_id: thivien-poetry
+    publisher: phamson02/vietnamese-poetry-corpus, collected from thivien.net
+    location: hf://datasets/phamson02/vietnamese-poetry-corpus
+    revision: 0c98940ee8492f7519bddf0c41de5d5eba4856e2
+    license: CC-BY-4.0 (dataset card); poems keep their authors' rights
+    status: approved_research
+    reviewer: HAMIC (project owner)
+    reviewed_on: 2026-11-22
+    rationale: "199K Vietnamese poems, classical and modern: a genre absent from the corpus. CC-BY-4.0 dataset, research use (D-008)."
+    attribution: "Vietnamese poetry corpus (phamson02), CC-BY-4.0; poems from thivien.net."
+    pii_risk: low
+    notes: The source is lower-cased with spaced punctuation; the `spaced_poem` transform restores lines, punctuation and line-initial capitals (proper names inside lines stay lower-cased). Poems are grouped with their titles.
+
+  # -- v0.14 (22/11/2026): books and news (group 2 of docs/data/v0.13-sources.md),
+  # approved by the project owner for research use.
+  - source_id: vi-books
+    publisher: tmnam20/Vietnamese-Book-Corpus (Hugging Face), origin of the books not documented
+    location: hf://datasets/tmnam20/Vietnamese-Book-Corpus
+    revision: 3dc42886bdb38338e6cc03b5093c28b5b5694d0b
+    license: Not stated on the dataset card; books (novels, translated classics) are very likely under copyright
+    status: approved_research
+    reviewer: HAMIC (project owner)
+    reviewed_on: 2026-11-22
+    rationale: "16,407 book texts (3.7 GB): long-form literature and non-fiction, absent from web text. Research-only use (D-008) accepted by the project owner despite the unstated licence; no redistribution of the text."
+    attribution: "Vietnamese Book Corpus (tmnam20)."
+    pii_risk: low
+    notes: Line breaks are collapsed in the source. Overlap with FineWeb-2 (e-book sites) is removed by the dedup index.
+
+  - source_id: binhvq-dedup
+    publisher: imthanhlv/binhvq_dedup (Hugging Face), from the github.com/binhvq/news-corpus dump of 21/05/2021
+    location: hf://datasets/imthanhlv/binhvq_dedup
+    revision: a203e97ece3eced76989a77cc5c18d48b937a8cc
+    license: Not stated; news articles are under the publishers' copyright (research use)
+    status: approved_research
+    reviewer: HAMIC (project owner)
+    reviewed_on: 2026-11-23
+    rationale: "Whole Vietnamese news articles (title, sapo, body; HTML removed, exact duplicates removed) from the binhvq corpus used by PhoBERT-era and later Vietnamese models: broad news coverage before mid-2021. Research-only use (D-008). Whole articles let the dedup index remove those already in v0.2-v0.13 (FineWeb-2)."
+    attribution: "binhvq news corpus (github.com/binhvq/news-corpus); cleaned dump imthanhlv/binhvq_dedup."
+    pii_risk: medium
+    notes: "Replaces vietgpt/binhvq_news_vi, whose rows are single shuffled paragraphs (about 280 characters) that cannot be rejoined into articles and that near-dedup cannot match against whole FineWeb-2 pages."
