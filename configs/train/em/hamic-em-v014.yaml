@@ -1,8 +1,9 @@
 # HAMIC-EM on cumulative corpus v0.14 with the final T1b tokenizer.
-# Same shape, budget and recipe as hamic-em-v05 so the run isolates corpus + tokenizer.
+# Same shape and recipe as hamic-em-v05; one weighted epoch and a 1.5x batch.
 # v0.14 train: 78,958,189,835 T1b tokens (v0.12 web + Wikipedia 66.24B, news 5.93B,
 # PDF 5.16B, books 0.65B, legal 0.40B, VOZ 0.34B, ViSoBERT social 0.22B, poetry 0.03B).
-# 20B is ~0.25 epoch. Social text is upweighted: EM trails ES and ViSoBERT on VSMEC.
+# One epoch with the weights below is ~81B tokens (Wikipedia ~0.6B estimated).
+# Social text is upweighted: EM trails ES and ViSoBERT on VSMEC.
 version: 1
 run_id: hamic-em-v014
 model_preset: configs/models/hamic-em.yaml   # 28 x 1024, ~348.8M parameters
@@ -10,11 +11,11 @@ tokenized: data/tokenized/v0.14/t1b-bbpe-20544
 objective: mlm
 mask_rate: 0.30
 seq_len: 512
-micro_batch_size: 64
-grad_accum_steps: 8          # 262,144 tokens per optimizer step
-total_tokens: 2.0e10         # ~76,294 optimizer steps
+micro_batch_size: 96          # v05 used 64 at 40.9 GiB peak of 96 GB
+grad_accum_steps: 8          # 393,216 tokens per optimizer step
+total_tokens: 8.1e10         # ~205,994 optimizer steps, ~1 weighted epoch
 learning_rate: 5.0e-4
-warmup_ratio: 0.04           # ~3,052 steps
+warmup_ratio: 0.04           # ~8,240 steps
 min_lr_ratio: 0.1
 betas: [0.9, 0.98]
 weight_decay: 0.01
